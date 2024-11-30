@@ -1,10 +1,27 @@
 import { HistoryDB } from '../utils/db.js';
 import { BACKEND_URL } from '../utils/constants.js';
+import { ConfigManager } from '../utils/config.js';
 
 class PopupManager {
   constructor() {
     this.connectionStatus = document.getElementById('connectionStatus');
     this.cacheStatus = document.getElementById('cacheStatus');
+    this.filterToggle = document.getElementById('filterInternalAddresses');
+    
+    this.initializeUI();
+  }
+  
+  async initializeUI() {
+    // Load and set config
+    const config = await ConfigManager.getConfig();
+    this.filterToggle.checked = config.filterInternalAddresses;
+    
+    // Add event listener
+    this.filterToggle.addEventListener('change', async (e) => {
+      await ConfigManager.updateConfig({
+        filterInternalAddresses: e.target.checked
+      });
+    });
     
     this.updateStatus();
   }
@@ -37,7 +54,4 @@ class PopupManager {
   }
 }
 
-// 初始化popup
-document.addEventListener('DOMContentLoaded', () => {
-  new PopupManager();
-}); 
+new PopupManager(); 

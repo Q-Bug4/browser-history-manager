@@ -1,5 +1,6 @@
 import { HistoryDB } from '../utils/db.js';
 import { BACKEND_URL, RETRY_INTERVAL, BATCH_SIZE } from '../utils/constants.js';
+import { ConfigManager } from '../utils/config.js';
 
 const db = new HistoryDB();
 
@@ -20,8 +21,11 @@ initialize().catch(error => {
 chrome.history.onVisited.addListener(async (historyItem) => {
   const url = new URL(historyItem.url);
   
-  // 过滤内网地址
-  if (isInternalAddress(url.hostname)) {
+  // Get current config
+  const config = await ConfigManager.getConfig();
+  
+  // Only filter if enabled
+  if (config.filterInternalAddresses && isInternalAddress(url.hostname)) {
     return;
   }
   
