@@ -3,7 +3,6 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
     pub elasticsearch: ElasticsearchConfig,
-    pub mongodb: MongoConfig,
     pub server: ServerConfig,
 }
 
@@ -11,12 +10,6 @@ pub struct AppConfig {
 pub struct ElasticsearchConfig {
     pub url: String,
     pub index: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MongoConfig {
-    pub url: String,
-    pub database: String,
 }
 
 #[derive(Debug, Deserialize)]

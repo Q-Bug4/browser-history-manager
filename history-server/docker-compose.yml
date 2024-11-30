@@ -12,15 +12,6 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
 
-  mongodb:
-    image: mongo:6.0
-    environment:
-      - MONGO_INITDB_DATABASE=history_db
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-
 volumes:
   es_data:
   mongo_data: 
