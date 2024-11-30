@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Browser History Manager",
+  "version": "1.0.0",
+  "description": "A browser history management system",
+  "permissions": [
+    "history",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/popup.html"
+  }
+} 
