@@ -11,6 +11,8 @@ use crate::{
     services::{EsService, MongoService},
     handlers::history::{insert_history, query_history},
 };
+use actix_cors::Cors;
+use actix_web::{http::header, middleware};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -32,7 +34,16 @@ async fn main() -> std::io::Result<()> {
     info!("Starting server at {}:{}", config.server.host, config.server.port);
     
     HttpServer::new(move || {
+        // 配置 CORS
+        let cors = Cors::default()
+            .allow_any_origin() // 允许所有来源
+            .allow_any_method() // 允许所有 HTTP 方法
+            .allow_any_header() // 允许所有请求头
+            .max_age(3600); // 设置预检请求的缓存时间（秒）
+
         App::new()
+            .wrap(cors) // 添加 CORS 中间件
+            .wrap(middleware::Logger::default()) // 添加日志中间件
             .app_data(web::Data::new(es_service.clone()))
             .app_data(web::Data::new(mongo_service.clone()))
             .service(

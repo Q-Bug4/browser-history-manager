@@ -17,3 +17,4 @@ log = "0.4.20"
 anyhow = "1.0.75"
 thiserror = "1.0.50"
 uuid = { version = "1.6.1", features = ["v4"] }
+actix-cors = "0.6"
