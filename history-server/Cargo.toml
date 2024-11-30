@@ -18,3 +18,5 @@ anyhow = "1.0.75"
 thiserror = "1.0.50"
 uuid = { version = "1.6.1", features = ["v4"] }
 actix-cors = "0.6"
+utoipa = { version = "4.1", features = ["actix_extras", "chrono"] }
+utoipa-swagger-ui = { version = "5.0", features = ["actix-web"] }
