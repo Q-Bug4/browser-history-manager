@@ -2,6 +2,7 @@ use elasticsearch::{
     Elasticsearch,
     SearchParts,
     Error as ElasticsearchError,
+    IndexParts,
 };
 use serde_json::{json, Value};
 
@@ -96,4 +97,25 @@ pub async fn search_history(
 
     let response_body = response.json::<Value>().await?;
     Ok(response_body)
+}
+
+pub async fn insert_history(
+    client: &Elasticsearch,
+    url: &str,
+    timestamp: &str,
+    domain: &str,
+) -> Result<(), ElasticsearchError> {
+    let doc = json!({
+        "timestamp": timestamp,
+        "url": url,
+        "domain": domain
+    });
+
+    client
+        .index(IndexParts::Index("browser-history"))
+        .body(doc)
+        .send()
+        .await?;
+
+    Ok(())
 } 
