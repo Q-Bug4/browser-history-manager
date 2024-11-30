@@ -12,7 +12,8 @@ class PopupManager {
   async updateStatus() {
     // 更新连接状态
     try {
-      const response = await fetch(`${BACKEND_URL}/health`);
+      const response = await fetch(`${BACKEND_URL}/api/health`);
+      console.log('Backend health check response:', response);
       if (response.ok) {
         this.connectionStatus.textContent = 'Connected to backend';
         this.connectionStatus.className = 'status-indicator connected';
@@ -22,6 +23,7 @@ class PopupManager {
     } catch (error) {
       this.connectionStatus.textContent = 'Disconnected from backend';
       this.connectionStatus.className = 'status-indicator disconnected';
+      console.error('Failed to update connection status:', error);
     }
     
     // 更新缓存状态

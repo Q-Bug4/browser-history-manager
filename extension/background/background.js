@@ -2,7 +2,19 @@ import { HistoryDB } from '../utils/db.js';
 import { BACKEND_URL, RETRY_INTERVAL, BATCH_SIZE } from '../utils/constants.js';
 
 const db = new HistoryDB();
-await db.init();
+
+async function initialize() {
+  await db.init();
+  // 初始启动时执行一次重试
+  await retryFailedRecords();
+  // 启动定期重试
+  setInterval(retryFailedRecords, RETRY_INTERVAL);
+}
+
+// 启动初始化
+initialize().catch(error => {
+  console.error('Failed to initialize:', error);
+});
 
 // 监听历史记录变化
 chrome.history.onVisited.addListener(async (historyItem) => {
@@ -37,7 +49,7 @@ function isInternalAddress(hostname) {
 
 // 上报到后端
 async function reportToBackend(record) {
-  const response = await fetch(`${BACKEND_URL}/history`, {
+  const response = await fetch(`${BACKEND_URL}/api/history`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -82,8 +94,3 @@ async function retryFailedRecords() {
     console.error('Error during retry:', error);
   }
 }
-
-// 启动定期重试
-setInterval(retryFailedRecords, RETRY_INTERVAL);
-// 初始启动时也执行一次重试
-retryFailedRecords(); 
