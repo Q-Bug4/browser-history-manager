@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Browser History Manager</h2>
+    
+    <div class="status-section">
+      <div id="connectionStatus" class="status-indicator"></div>
+      <div id="cacheStatus" class="status-info"></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="setting-item">
+        <label class="switch">
+          <input type="checkbox" id="filterInternalAddresses">
+          <span class="slider"></span>
+        </label>
+        <span class="setting-label">Filter Internal Addresses</span>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html> 
