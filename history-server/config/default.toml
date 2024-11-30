@@ -1,0 +1,11 @@
+[elasticsearch]
+url = "http://localhost:19200"
+index = "browser-history"
+
+[mongodb]
+url = "mongodb://localhost:21017"
+database = "browser_history"
+
+[server]
+host = "127.0.0.1"
+port = 8080

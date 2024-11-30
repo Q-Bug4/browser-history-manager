@@ -1,166 +1,99 @@
 use elasticsearch::{
     Elasticsearch,
-    Error as ElasticsearchError,
-    http::transport::Transport,
-    indices::{IndicesCreateParts, IndicesExistsParts},
-    params::Refresh,
     SearchParts,
-    CreateParts,
+    Error as ElasticsearchError,
 };
 use serde_json::{json, Value};
-use crate::{
-    models::history::{HistoryRecord, HistoryQuery},
-    error::AppError,
-    config::ElasticsearchConfig,
-};
 
-#[derive(Clone)]
-pub struct EsService {
-    client: Elasticsearch,
-    index: String,
-}
+pub async fn search_history(
+    client: &Elasticsearch,
+    keyword: Option<String>,
+    domain: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    page: Option<i32>,
+    page_size: Option<i32>,
+) -> Result<Value, ElasticsearchError> {
+    let page = page.unwrap_or(1);
+    let page_size = page_size.unwrap_or(30);
+    let from = (page - 1) * page_size;
 
-impl EsService {
-    pub async fn new(config: &ElasticsearchConfig) -> Result<Self, AppError> {
-        let transport = Transport::single_node(&config.url)
-            .map_err(|e| AppError::InternalError(e.to_string()))?;
-        let client = Elasticsearch::new(transport);
-        let service = Self {
-            client,
-            index: config.index.clone(),
-        };
-        
-        // 确保索引存在
-        service.ensure_index().await?;
-        Ok(service)
-    }
-
-    async fn ensure_index(&self) -> Result<(), AppError> {
-        let exists = self.client
-            .indices()
-            .exists(IndicesExistsParts::Index(&[&self.index]))
-            .send()
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?
-            .status_code()
-            .is_success();
-
-        if !exists {
-            self.client
-                .indices()
-                .create(IndicesCreateParts::Index(&self.index))
-                .body(json!({
-                    "mappings": {
-                        "properties": {
-                            "timestamp": { "type": "date" },
-                            "url": { "type": "keyword" },
-                            "domain": { "type": "keyword" }
-                        }
-                    }
-                }))
-                .send()
-                .await
-                .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    // 构建查询
+    let mut query = json!({
+        "bool": {
+            "must": []
         }
-        Ok(())
+    });
+
+    let must_array = query["bool"]["must"].as_array_mut().unwrap();
+
+    // 添加关键词搜索
+    if let Some(keyword) = keyword {
+        if !keyword.is_empty() {
+            must_array.push(json!({
+                "multi_match": {
+                    "query": keyword,
+                    "fields": ["url", "domain"],
+                    "type": "phrase_prefix"
+                }
+            }));
+        }
     }
 
-    pub async fn insert_record(&self, record: &HistoryRecord) -> Result<(), AppError> {
-        self.client
-            .create(CreateParts::IndexId(&self.index, &uuid::Uuid::new_v4().to_string()))
-            .body(record)
-            .refresh(Refresh::True)
-            .send()
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-        Ok(())
+    // 添加域名过滤
+    if let Some(domain) = domain {
+        if !domain.is_empty() {
+            must_array.push(json!({
+                "term": {
+                    "domain.keyword": domain
+                }
+            }));
+        }
     }
 
-    pub async fn search_records(&self, query: &HistoryQuery) -> Result<Vec<HistoryRecord>, AppError> {
-        let mut query_body = json!({
-            "sort": [
-                { "timestamp": { "order": "desc" } }
-            ]
+    // 添加时间范围过滤
+    if start_date.is_some() || end_date.is_some() {
+        let mut range = json!({
+            "range": {
+                "timestamp": {}
+            }
         });
 
-        // 构建查询条件
-        let mut must_conditions = Vec::new();
-
-        if let Some(ref keyword) = query.url_keyword {
-            must_conditions.push(json!({
-                "wildcard": {
-                    "url": {
-                        "value": format!("*{}*", keyword)
-                    }
-                }
-            }));
+        if let Some(start) = start_date {
+            range["range"]["timestamp"]["gte"] = json!(start);
+        }
+        if let Some(end) = end_date {
+            range["range"]["timestamp"]["lte"] = json!(end);
         }
 
-        if let Some(ref domain) = query.domain {
-            must_conditions.push(json!({
-                "term": {
-                    "domain": domain
-                }
-            }));
-        }
-
-        let mut range = json!({});
-        if query.start_time.is_some() || query.end_time.is_some() {
-            let mut range_conditions = json!({});
-            
-            if let Some(start_time) = query.start_time {
-                range_conditions["gte"] = json!(start_time);
-            }
-            if let Some(end_time) = query.end_time {
-                range_conditions["lte"] = json!(end_time);
-            }
-            
-            range = json!({
-                "range": {
-                    "timestamp": range_conditions
-                }
-            });
-            must_conditions.push(range);
-        }
-
-        if !must_conditions.is_empty() {
-            query_body["query"] = json!({
-                "bool": {
-                    "must": must_conditions
-                }
-            });
-        }
-
-        // 分页
-        let page = query.page.unwrap_or(1);
-        let page_size = query.page_size.unwrap_or(30);
-        query_body["from"] = json!((page - 1) * page_size);
-        query_body["size"] = json!(page_size);
-
-        let response = self.client
-            .search(SearchParts::Index(&[&self.index]))
-            .body(query_body)
-            .send()
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        let response_body = response.json::<Value>()
-            .await
-            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-
-        let hits = response_body["hits"]["hits"]
-            .as_array()
-            .ok_or_else(|| AppError::DatabaseError("Invalid response format".to_string()))?;
-
-        // 修改这里的结果处理逻辑
-        let records: Result<Vec<HistoryRecord>, _> = hits
-            .iter()
-            .map(|hit| {
-                serde_json::from_value::<HistoryRecord>(hit["_source"].clone())
-                    .map_err(|e| AppError::DatabaseError(e.to_string()))
-            })
-            .collect();
-
-        records
+        must_array.push(range);
     }
+
+    // 如果没有任何查询条件，使用 match_all
+    if must_array.is_empty() {
+        query = json!({
+            "match_all": {}
+        });
+    }
+
+    // 构建完整的搜索请求
+    let body = json!({
+        "query": query,
+        "from": from,
+        "size": page_size,
+        "sort": [
+            { "timestamp": { "order": "desc" } }
+        ]
+    });
+
+    println!("ES Query: {}", serde_json::to_string_pretty(&body).unwrap());
+
+    let response = client
+        .search(SearchParts::Index(&["browser-history"]))
+        .body(body)
+        .send()
+        .await?;
+
+    let response_body = response.json::<Value>().await?;
+    Ok(response_body)
 } 
