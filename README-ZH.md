@@ -28,19 +28,28 @@
 - 前端：Vue 3 + Material Design
 - 部署：Docker + Docker Compose
 
-## 安装说明
+## Docker 部署说明
 
-### 环境要求
-- Docker Compose
-- Node.js
-- Rust
-- Chrome浏览器
+### 1. 构建镜像
+首先在项目根目录下构建Docker镜像：
 
-### 部署步骤
-1. 克隆项目代码
-2. 在项目根目录执行Docker Compose命令启动服务
-3. 在Chrome浏览器中加载插件
-4. 访问Web界面进行配置
+  ```bash
+  docker build -t history-server:latest .
+  ```
+
+### 2. 启动服务
+使用 Docker Compose 启动所有服务：
+
+  ```bash
+  docker-compose up -d
+  ```
+### 环境变量说明
+history-server 支持以下环境变量配置：
+- `APP__ELASTICSEARCH__URL`: Elasticsearch服务器地址（默认：http://elasticsearch:9200）
+- `APP__SERVER__HOST`: 服务监听地址（默认：0.0.0.0）
+- `APP__SERVER__PORT`: 服务监听端口（默认：8080）
+
+如需自定义这些配置，可以在 docker-compose.yml 的 environment 部分添加相应的环境变量。
 
 ## 使用说明
 
