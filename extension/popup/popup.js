@@ -10,6 +10,11 @@ class PopupManager {
     this.notificationToggle = document.getElementById('showFailureNotifications');
     
     this.initializeUI();
+    
+    // 添加打开配置页面的事件监听
+    document.getElementById('openOptions').addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
   }
   
   async initializeUI() {

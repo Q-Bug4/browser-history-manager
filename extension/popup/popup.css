@@ -102,4 +102,20 @@ input:checked + .slider {
 
 input:checked + .slider:before {
   transform: translateX(16px);
+}
+
+.footer {
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+  text-align: center;
+}
+
+.footer a {
+  color: #2196F3;
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
 } 
