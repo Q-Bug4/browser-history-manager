@@ -61,11 +61,12 @@ const headers = [
   {
     title: 'Time',
     key: 'timestamp',
-    width: '200px'
+    width: '180px'
   },
   {
     title: 'URL',
     key: 'url',
+    width: 'auto'
   },
   {
     title: 'Domain',
@@ -75,10 +76,22 @@ const headers = [
 ];
 
 function formatDate(timestamp) {
-  return format(new Date(timestamp), 'MMM d, yyyy HH:mm:ss');
+  return format(new Date(timestamp), 'yyyy-MM-dd-HH-mm-ss');
 }
 
 function calculateIndex(index) {
   return (props.page - 1) * props.pageSize + index + 1;
 }
-</script> 
+</script>
+
+<style scoped>
+:deep(.v-data-table-header th:nth-child(2)),
+:deep(.v-data-table tbody td:nth-child(2)) {
+  white-space: nowrap;
+}
+
+:deep(.v-data-table tbody td:nth-child(3)) {
+  word-break: break-all;
+  white-space: normal;
+}
+</style> 
