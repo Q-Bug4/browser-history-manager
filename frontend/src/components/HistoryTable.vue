@@ -5,7 +5,12 @@
       :items="items"
       :loading="loading"
       :items-per-page="-1"
+      hide-default-footer
     >
+      <template v-slot:item.index="{ item, index }">
+        {{ calculateIndex(index) }}
+      </template>
+
       <template v-slot:item.url="{ item }">
         <a :href="item.url" target="_blank" class="text-decoration-none">
           {{ item.url }}
@@ -36,10 +41,23 @@ const props = defineProps({
   loading: {
     type: Boolean,
     default: false
+  },
+  page: {
+    type: Number,
+    default: 1
+  },
+  pageSize: {
+    type: Number,
+    default: 30
   }
 });
 
 const headers = [
+  {
+    title: '#',
+    key: 'index',
+    width: '70px'
+  },
   {
     title: 'Time',
     key: 'timestamp',
@@ -58,5 +76,9 @@ const headers = [
 
 function formatDate(timestamp) {
   return format(new Date(timestamp), 'MMM d, yyyy HH:mm:ss');
+}
+
+function calculateIndex(index) {
+  return (props.page - 1) * props.pageSize + index + 1;
 }
 </script> 

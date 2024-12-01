@@ -30,7 +30,7 @@ async fn create_es_client(config: &ElasticsearchConfig) -> Elasticsearch {
         report_history,
     ),
     components(
-        schemas(HistoryRecord, SearchQuery, HistoryRequest)
+        schemas(HistoryRecord, HistoryRequest)
     ),
     tags(
         (name = "history", description = "Browser History API")
@@ -47,20 +47,33 @@ struct HistoryRecord {
 }
 
 // 定义查询参数
-#[derive(Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Serialize, Deserialize, IntoParams)]
 struct SearchQuery {
-    #[schema(example = "example.com")]
-    domain: Option<String>,
-    #[schema(example = "search")]
+    #[param(example = "search")]
     keyword: Option<String>,
-    #[schema(example = "2023-12-01T00:00:00Z")]
+    #[param(example = "example.com")]
+    domain: Option<String>,
+    #[param(example = "2023-12-01T00:00:00Z")]
+    #[serde(rename = "startDate")]
     start_date: Option<String>,
-    #[schema(example = "2023-12-31T23:59:59Z")]
+    #[param(example = "2023-12-31T23:59:59Z")]
+    #[serde(rename = "endDate")]
     end_date: Option<String>,
-    #[schema(default = 1)]
+    #[serde(default = "default_page")]
+    #[param(default = "1")]
     page: Option<i32>,
-    #[schema(default = 30)]
+    #[serde(default = "default_page_size")]
+    #[param(default = "30")]
+    #[serde(rename = "pageSize")]
     page_size: Option<i32>,
+}
+
+fn default_page() -> Option<i32> {
+    Some(1)
+}
+
+fn default_page_size() -> Option<i32> {
+    Some(30)
 }
 
 // Add new request model
@@ -96,10 +109,10 @@ async fn health() -> impl Responder {
     params(
         ("keyword" = Option<String>, Query, description = "Search keyword"),
         ("domain" = Option<String>, Query, description = "Domain filter"),
-        ("start_date" = Option<String>, Query, description = "Start date (ISO 8601)"),
-        ("end_date" = Option<String>, Query, description = "End date (ISO 8601)"),
+        ("startDate" = Option<String>, Query, description = "Start date (ISO 8601)"),
+        ("endDate" = Option<String>, Query, description = "End date (ISO 8601)"),
         ("page" = Option<i32>, Query, description = "Page number"),
-        ("page_size" = Option<i32>, Query, description = "Items per page")
+        ("pageSize" = Option<i32>, Query, description = "Items per page")
     ),
     responses(
         (status = 200, description = "List of history records", body = Vec<HistoryRecord>),
@@ -112,6 +125,9 @@ async fn search_history(
     query: web::Query<SearchQuery>,
     es_client: web::Data<Arc<Elasticsearch>>,
 ) -> impl Responder {
+    // 验证 page_size 的范围
+    let page_size = query.page_size.unwrap_or(30).min(1000);
+    
     match es::search_history(
         &es_client,
         query.keyword.clone(),
@@ -119,30 +135,20 @@ async fn search_history(
         query.start_date.clone(),
         query.end_date.clone(),
         query.page,
-        query.page_size,
+        Some(page_size), // 确保传入验证后的 page_size
     ).await {
         Ok(response) => {
-            // 从 ES 响应中提取记录
-            if let Some(hits) = response["hits"]["hits"].as_array() {
-                let records: Vec<HistoryRecord> = hits
-                    .iter()
-                    .filter_map(|hit| {
-                        let source = hit["_source"].as_object()?;
-                        Some(HistoryRecord {
-                            timestamp: source["timestamp"].as_str()?.to_string(),
-                            url: source["url"].as_str()?.to_string(),
-                            domain: source["domain"].as_str()?.to_string(),
-                        })
-                    })
-                    .collect();
-                HttpResponse::Ok().json(records)
-            } else {
-                HttpResponse::Ok().json(Vec::<HistoryRecord>::new())
-            }
+            HttpResponse::Ok().json(response)
         }
         Err(e) => {
             eprintln!("Search error: {}", e);
-            HttpResponse::InternalServerError().finish()
+            HttpResponse::InternalServerError().json(json!({
+                "error": "Failed to search history",
+                "items": [],
+                "total": 0,
+                "page": query.page.unwrap_or(1),
+                "pageSize": page_size
+            }))
         }
     }
 }

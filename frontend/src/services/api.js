@@ -20,7 +20,16 @@ export async function searchHistory(params) {
 
   try {
     const response = await api.get(`/api/history?${queryParams.toString()}`);
-    return response;
+    
+    // Transform response to match expected format
+    return {
+      data: {
+        items: response.data.items || response.data, // Handle both new and old response format
+        total: response.data.total || response.data.length,
+        page: response.data.page || params.page,
+        pageSize: response.data.pageSize || params.pageSize
+      }
+    };
   } catch (error) {
     console.error('API Error:', error);
     throw error;
