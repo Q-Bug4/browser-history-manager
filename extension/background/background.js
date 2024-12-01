@@ -39,6 +39,7 @@ chrome.history.onVisited.addListener(async (historyItem) => {
     await reportToBackend(record);
   } catch (error) {
     console.error('Failed to report history:', error);
+    await showFailureNotification(record.url);
     await cacheFailedRecord(record);
   }
 });
@@ -85,7 +86,6 @@ async function retryFailedRecords() {
         successfulTimestamps.push(record.timestamp);
       } catch (error) {
         console.error('Retry failed for record:', error);
-        // 跳过失败的记录，继续处理下一条
         continue;
       }
     }
@@ -96,5 +96,41 @@ async function retryFailedRecords() {
     }
   } catch (error) {
     console.error('Error during retry:', error);
+  }
+}
+
+// 1x1像素的透明PNG图片的base64编码
+const TRANSPARENT_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==';
+
+// 修改通知函数
+async function showFailureNotification(url) {
+  try {
+    const config = await ConfigManager.getConfig();
+    console.log('Notification config:', config.showFailureNotifications);
+    
+    if (!config.showFailureNotifications) {
+      console.log('Notifications are disabled');
+      return;
+    }
+
+    const notificationOptions = {
+      type: 'basic',
+      iconUrl: TRANSPARENT_ICON,
+      title: 'History Report Failed',
+      message: `Failed to report history for: ${url}\n\nYou can disable these notifications in the extension popup.`,
+      priority: 2
+    };
+    
+    console.log('Creating notification with options:', notificationOptions);
+    
+    chrome.notifications.create('', notificationOptions, (notificationId) => {
+      if (chrome.runtime.lastError) {
+        console.error('Test notification failed:', chrome.runtime.lastError.message);
+      } else {
+        console.log('Notification created with ID:', notificationId);
+      }
+    });
+  } catch (error) {
+    console.error('Error showing notification:', error);
   }
 }

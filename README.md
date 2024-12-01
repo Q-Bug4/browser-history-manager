@@ -28,6 +28,30 @@ The system consists of three core modules:
 - Frontend: Vue 3 + Material Design
 - Deployment: Docker + Docker Compose
 
+## Docker Deployment
+
+### 1. Build Image
+First, build the Docker image in the project root directory:
+
+  ```bash
+  docker build -t history-server:latest .
+  ```
+
+### 2. Start Services
+Use Docker Compose to start all services:
+
+  ```bash
+  docker-compose up -d
+  ```
+
+### Environment Variables
+history-server supports the following environment variable configurations:
+- `APP__ELASTICSEARCH__URL`: Elasticsearch server address (default: http://elasticsearch:9200)
+- `APP__SERVER__HOST`: Service listening address (default: 0.0.0.0)
+- `APP__SERVER__PORT`: Service listening port (default: 8080)
+
+To customize these configurations, you can add the corresponding environment variables in the environment section of docker-compose.yml.
+
 ## Installation
 
 ### Prerequisites

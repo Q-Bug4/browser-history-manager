@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Browser History Manager Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Browser History Manager Settings</h1>
+    
+    <section class="pending-records">
+      <h2>Pending Records</h2>
+      <div class="records-info">
+        <span id="pendingCount">Loading...</span>
+        <button id="retryAll">Retry All</button>
+      </div>
+      <div id="recordsList" class="records-list">
+        <!-- Records will be inserted here -->
+      </div>
+    </section>
+
+    <section class="manual-sync">
+      <h2>Manual Sync</h2>
+      <div class="sync-controls">
+        <div class="date-range">
+          <label>
+            From:
+            <input type="datetime-local" id="syncStartTime">
+          </label>
+          <label>
+            To:
+            <input type="datetime-local" id="syncEndTime">
+          </label>
+        </div>
+        <button id="startSync">Start Sync</button>
+      </div>
+      <div id="syncProgress" class="sync-progress">
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
+        <div class="progress-text"></div>
+      </div>
+    </section>
+  </div>
+  <script src="options.js" type="module"></script>
+</body>
+</html> 

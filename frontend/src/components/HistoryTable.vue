@@ -5,7 +5,12 @@
       :items="items"
       :loading="loading"
       :items-per-page="-1"
+      hide-default-footer
     >
+      <template v-slot:item.index="{ item, index }">
+        {{ calculateIndex(index) }}
+      </template>
+
       <template v-slot:item.url="{ item }">
         <a :href="item.url" target="_blank" class="text-decoration-none">
           {{ item.url }}
@@ -36,18 +41,32 @@ const props = defineProps({
   loading: {
     type: Boolean,
     default: false
+  },
+  page: {
+    type: Number,
+    default: 1
+  },
+  pageSize: {
+    type: Number,
+    default: 30
   }
 });
 
 const headers = [
   {
+    title: '#',
+    key: 'index',
+    width: '70px'
+  },
+  {
     title: 'Time',
     key: 'timestamp',
-    width: '200px'
+    width: '180px'
   },
   {
     title: 'URL',
     key: 'url',
+    width: 'auto'
   },
   {
     title: 'Domain',
@@ -57,6 +76,22 @@ const headers = [
 ];
 
 function formatDate(timestamp) {
-  return format(new Date(timestamp), 'MMM d, yyyy HH:mm:ss');
+  return format(new Date(timestamp), 'yyyy-MM-dd-HH-mm-ss');
 }
-</script> 
+
+function calculateIndex(index) {
+  return (props.page - 1) * props.pageSize + index + 1;
+}
+</script>
+
+<style scoped>
+:deep(.v-data-table-header th:nth-child(2)),
+:deep(.v-data-table tbody td:nth-child(2)) {
+  white-space: nowrap;
+}
+
+:deep(.v-data-table tbody td:nth-child(3)) {
+  word-break: break-all;
+  white-space: normal;
+}
+</style> 

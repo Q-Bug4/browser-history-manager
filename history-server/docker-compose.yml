@@ -12,6 +12,14 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
 
+  history-server:
+    image: history-server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - APP__ELASTICSEARCH__URL=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+
 volumes:
   es_data:
-  mongo_data: 

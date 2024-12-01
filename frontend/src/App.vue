@@ -12,10 +12,17 @@
           @search="fetchHistory"
         />
 
+        <div class="d-flex align-center justify-space-between mt-6 mb-2">
+          <span class="text-subtitle-1">
+            Total Records: {{ totalItems }}
+          </span>
+        </div>
+
         <history-table
           :loading="loading"
           :items="historyItems"
-          class="mt-6"
+          :page="pagination.page"
+          :page-size="pagination.itemsPerPage"
         />
 
         <custom-pagination
@@ -62,8 +69,8 @@ async function fetchHistory() {
       pageSize: pagination.itemsPerPage,
     });
     
-    historyItems.value = response.data;
-    totalItems.value = response.data.length;
+    historyItems.value = response.data.items;
+    totalItems.value = response.data.total;
   } catch (error) {
     console.error('Failed to fetch history:', error);
     historyItems.value = [];

@@ -16,7 +16,7 @@ pub async fn search_history(
     page_size: Option<i32>,
 ) -> Result<Value, ElasticsearchError> {
     let page = page.unwrap_or(1);
-    let page_size = page_size.unwrap_or(30);
+    let page_size = page_size.unwrap_or(30).min(1000);
     let from = (page - 1) * page_size;
 
     // 构建查询
@@ -77,11 +77,12 @@ pub async fn search_history(
         });
     }
 
-    // 构建完整的搜索请求
+    // 构建完整的搜索请求,添加track_total_hits确保获取准确的总数
     let body = json!({
         "query": query,
         "from": from,
         "size": page_size,
+        "track_total_hits": true,
         "sort": [
             { "timestamp": { "order": "desc" } }
         ]
@@ -96,7 +97,28 @@ pub async fn search_history(
         .await?;
 
     let response_body = response.json::<Value>().await?;
-    Ok(response_body)
+    
+    // 从ES响应中提取需要的数据
+    let hits = response_body["hits"]["hits"].as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(|hit| hit["_source"].clone())
+        .collect::<Vec<Value>>();
+
+    // 获取总记录数    
+    let total = response_body["hits"]["total"]["value"]
+        .as_i64()
+        .unwrap_or(0) as i32;
+
+    // 构建新的返回格式    
+    let result = json!({
+        "items": hits,
+        "total": total,
+        "page": page,
+        "pageSize": page_size
+    });
+
+    Ok(result)
 }
 
 pub async fn insert_history(
