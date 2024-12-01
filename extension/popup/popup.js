@@ -7,6 +7,7 @@ class PopupManager {
     this.connectionStatus = document.getElementById('connectionStatus');
     this.cacheStatus = document.getElementById('cacheStatus');
     this.filterToggle = document.getElementById('filterInternalAddresses');
+    this.notificationToggle = document.getElementById('showFailureNotifications');
     
     this.initializeUI();
   }
@@ -15,11 +16,18 @@ class PopupManager {
     // Load and set config
     const config = await ConfigManager.getConfig();
     this.filterToggle.checked = config.filterInternalAddresses;
+    this.notificationToggle.checked = config.showFailureNotifications;
     
-    // Add event listener
+    // Add event listeners
     this.filterToggle.addEventListener('change', async (e) => {
       await ConfigManager.updateConfig({
         filterInternalAddresses: e.target.checked
+      });
+    });
+
+    this.notificationToggle.addEventListener('change', async (e) => {
+      await ConfigManager.updateConfig({
+        showFailureNotifications: e.target.checked
       });
     });
     
