@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+// 创建API客户端
 const api = axios.create({
-  baseURL: 'http://localhost:8080',
+  // 不设置baseURL，使用相对路径
+  baseURL: '',
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
@@ -19,7 +21,8 @@ export async function searchHistory(params) {
   queryParams.append('pageSize', params.pageSize.toString());
 
   try {
-    const response = await api.get(`/api/history?${queryParams.toString()}`);
+    // 使用/backend前缀，这会被Nginx拦截并代理到后端
+    const response = await api.get(`/backend/api/history?${queryParams.toString()}`);
     
     // Transform response to match expected format
     return {
