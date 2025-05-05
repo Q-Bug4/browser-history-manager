@@ -1,18 +1,25 @@
 import { HistoryDB } from '../utils/db.js';
-import { BATCH_SIZE, DEFAULT_CONFIG } from '../utils/constants.js';
+import { BATCH_SIZE, DEFAULT_CONFIG, LOG_LEVELS, LOG_LEVEL_NAMES } from '../utils/constants.js';
 import { ConfigManager } from '../utils/config.js';
 
 class OptionsManager {
   constructor() {
     this.db = new HistoryDB();
     this.backendUrl = '';
+    this.logLevel = DEFAULT_CONFIG.logLevel;
+    this.highlightEnabled = DEFAULT_CONFIG.highlightVisitedLinks;
     this.initializeElements();
     this.loadConfig();
     this.attachEventListeners();
     this.loadPendingRecords();
+    this.setupTabs();
   }
 
   initializeElements() {
+    // 选项卡元素
+    this.tabButtons = document.querySelectorAll('.tab-button');
+    this.tabContents = document.querySelectorAll('.tab-content');
+    
     // 后端URL配置元素
     this.backendUrlInput = document.getElementById('backendUrl');
     this.saveBackendUrlButton = document.getElementById('saveBackendUrl');
@@ -29,6 +36,17 @@ class OptionsManager {
     this.startSyncButton = document.getElementById('startSync');
     this.syncProgress = document.getElementById('syncProgress');
     
+    // 系统设置元素
+    this.logLevelSelect = document.getElementById('logLevel');
+    this.saveLogLevelButton = document.getElementById('saveLogLevel');
+    this.logLevelStatus = document.getElementById('logLevelStatus');
+    this.currentSettingsDisplay = document.getElementById('currentSettings');
+    
+    // 高亮控制元素
+    this.highlightToggle = document.getElementById('highlightToggle');
+    this.saveHighlightButton = document.getElementById('saveHighlight');
+    this.highlightStatus = document.getElementById('highlightStatus');
+    
     // 设置默认日期范围 (最近7天)
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -39,13 +57,57 @@ class OptionsManager {
   async loadConfig() {
     const config = await ConfigManager.getConfig();
     this.backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
+    this.logLevel = config.logLevel !== undefined ? config.logLevel : DEFAULT_CONFIG.logLevel;
+    this.highlightEnabled = config.highlightVisitedLinks !== undefined ? config.highlightVisitedLinks : DEFAULT_CONFIG.highlightVisitedLinks;
+    
     this.backendUrlInput.value = this.backendUrl;
+    this.logLevelSelect.value = this.logLevel;
+    
+    // 如果高亮开关元素存在，设置其状态
+    if (this.highlightToggle) {
+      this.highlightToggle.checked = this.highlightEnabled;
+    }
+    
+    this.updateSettingsDisplay(config);
+    
+    // 确保本地存储与同步存储一致
+    this.syncToLocalStorage(config);
+  }
+  
+  syncToLocalStorage(config) {
+    // 将同步存储中的配置同步到本地存储
+    chrome.storage.local.set({
+      backendUrl: config.backendUrl || DEFAULT_CONFIG.backendUrl,
+      config: config
+    });
+  }
+
+  setupTabs() {
+    this.tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const tabName = button.dataset.tab;
+        
+        // 移除所有活动状态
+        this.tabButtons.forEach(btn => btn.classList.remove('active'));
+        this.tabContents.forEach(content => content.classList.remove('active'));
+        
+        // 设置当前选项卡活动
+        button.classList.add('active');
+        document.getElementById(`${tabName}-tab`).classList.add('active');
+      });
+    });
   }
 
   attachEventListeners() {
     this.saveBackendUrlButton.addEventListener('click', () => this.saveBackendUrl());
     this.retryAllButton.addEventListener('click', () => this.retryAllRecords());
     this.startSyncButton.addEventListener('click', () => this.startManualSync());
+    this.saveLogLevelButton.addEventListener('click', () => this.saveLogLevel());
+    
+    // 如果高亮设置按钮存在，添加事件监听
+    if (this.saveHighlightButton) {
+      this.saveHighlightButton.addEventListener('click', () => this.toggleHighlightSetting());
+    }
     
     // 输入框按回车也触发保存
     this.backendUrlInput.addEventListener('keypress', (e) => {
@@ -55,10 +117,55 @@ class OptionsManager {
     });
   }
   
+  // 添加高亮设置切换功能
+  async toggleHighlightSetting() {
+    if (!this.highlightToggle) return;
+    
+    const newValue = this.highlightToggle.checked;
+    
+    try {
+      // 更新配置
+      const config = await ConfigManager.getConfig();
+      config.highlightVisitedLinks = newValue;
+      await ConfigManager.saveConfig(config);
+      this.highlightEnabled = newValue;
+      
+      // 更新本地存储
+      chrome.storage.local.get(['config'], (result) => {
+        const localConfig = result.config || {};
+        localConfig.highlightVisitedLinks = newValue;
+        chrome.storage.local.set({ config: localConfig });
+        
+        // 发送消息给content scripts
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'HIGHLIGHT_SETTING_CHANGED',
+              enabled: newValue
+            }).catch(() => {
+              // 忽略发送消息的错误
+            });
+          });
+        });
+        
+        // 更新设置显示
+        this.updateSettingsDisplay(config);
+        this.showStatus(this.highlightStatus, 
+          newValue ? 'Highlight enabled' : 'Highlight disabled', 
+          true);
+      });
+    } catch (error) {
+      console.error('Failed to toggle highlight setting:', error);
+      this.showStatus(this.highlightStatus, 'Failed to update highlight setting', false);
+      // 重置UI状态
+      this.highlightToggle.checked = this.highlightEnabled;
+    }
+  }
+  
   async saveBackendUrl() {
     const newUrl = this.backendUrlInput.value.trim();
     if (!newUrl) {
-      this.showUrlStatus('URL cannot be empty', false);
+      this.showStatus(this.urlStatus, 'URL cannot be empty', false);
       return;
     }
     
@@ -70,35 +177,115 @@ class OptionsManager {
       try {
         const response = await fetch(`${newUrl}/api/health`);
         if (response.ok) {
-          this.showUrlStatus('Connection successful', true);
+          this.showStatus(this.urlStatus, 'Connection successful', true);
         } else {
-          this.showUrlStatus('Backend responded with error', false);
+          this.showStatus(this.urlStatus, 'Backend responded with error', false);
           return;
         }
       } catch (error) {
-        this.showUrlStatus('Failed to connect to backend', false);
+        this.showStatus(this.urlStatus, 'Failed to connect to backend', false);
         return;
       }
       
       // 保存URL到配置
-      await ConfigManager.updateConfig({ backendUrl: newUrl });
+      const config = await ConfigManager.getConfig();
+      config.backendUrl = newUrl;
+      await ConfigManager.saveConfig(config);
       this.backendUrl = newUrl;
       
       // 更新本地存储以便content script可以访问
-      chrome.storage.local.set({ backendUrl: newUrl });
+      // 先获取现有配置避免覆盖
+      chrome.storage.local.get(['config'], (result) => {
+        const localConfig = result.config || {};
+        localConfig.backendUrl = newUrl;
+        
+        // 同时更新backendUrl和config
+        chrome.storage.local.set({ 
+          backendUrl: newUrl, 
+          config: localConfig 
+        });
+        
+        // 更新设置显示
+        this.updateSettingsDisplay(config);
+      });
       
     } catch (error) {
-      this.showUrlStatus('Invalid URL format', false);
+      console.error('Invalid URL format:', error);
+      this.showStatus(this.urlStatus, 'Invalid URL format', false);
     }
   }
   
-  showUrlStatus(message, isSuccess) {
-    this.urlStatus.textContent = message;
-    this.urlStatus.className = isSuccess ? 'status-text success' : 'status-text error';
+  async saveLogLevel() {
+    const newLogLevel = parseInt(this.logLevelSelect.value);
+    if (isNaN(newLogLevel) || newLogLevel < 0 || newLogLevel > 4) {
+      this.showStatus(this.logLevelStatus, 'Invalid log level', false);
+      return;
+    }
+    
+    try {
+      // 更新配置
+      const config = await ConfigManager.getConfig();
+      config.logLevel = newLogLevel;
+      await ConfigManager.saveConfig(config);
+      this.logLevel = newLogLevel;
+      
+      // 更新本地存储 - 注意这里使用单独的对象来避免覆盖其他设置
+      chrome.storage.local.get(['config'], (result) => {
+        const localConfig = result.config || {};
+        localConfig.logLevel = newLogLevel;
+        chrome.storage.local.set({ config: localConfig });
+        
+        // 更新设置显示
+        this.updateSettingsDisplay(config);
+        
+        // 向所有内容脚本发送消息
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'LOG_LEVEL_CHANGED',
+              level: newLogLevel
+            }).catch(() => {
+              // 忽略发送消息的错误 - 有些标签页可能没有内容脚本
+            });
+          });
+        });
+        
+        this.showStatus(this.logLevelStatus, 'Log level saved', true);
+      });
+    } catch (error) {
+      console.error('Failed to save log level:', error);
+      this.showStatus(this.logLevelStatus, 'Failed to save log level', false);
+    }
+  }
+  
+  updateSettingsDisplay(config) {
+    const settings = [];
+    
+    // 添加后端URL
+    settings.push(`<div><strong>Backend URL:</strong> ${config.backendUrl || DEFAULT_CONFIG.backendUrl}</div>`);
+    
+    // 添加高亮设置
+    const highlightValue = config.highlightVisitedLinks !== undefined ? config.highlightVisitedLinks : DEFAULT_CONFIG.highlightVisitedLinks;
+    settings.push(`<div><strong>Highlight visited links:</strong> ${highlightValue ? 'Enabled' : 'Disabled'}</div>`);
+    
+    // 添加日志级别
+    const logLevel = config.logLevel !== undefined ? config.logLevel : DEFAULT_CONFIG.logLevel;
+    settings.push(`<div><strong>Log Level:</strong> ${LOG_LEVEL_NAMES[logLevel]} (${logLevel})</div>`);
+    
+    // 添加其他设置
+    settings.push(`<div><strong>Show failure notifications:</strong> ${config.showFailureNotifications ? 'Enabled' : 'Disabled'}</div>`);
+    settings.push(`<div><strong>Filter internal addresses:</strong> ${config.filterInternalAddresses !== false ? 'Enabled' : 'Disabled'}</div>`);
+    
+    this.currentSettingsDisplay.innerHTML = settings.join('');
+  }
+  
+  showStatus(element, message, isSuccess) {
+    element.textContent = message;
+    element.className = isSuccess ? 'status-text success' : 'status-text error';
     
     // 3秒后清除状态
     setTimeout(() => {
-      this.urlStatus.textContent = '';
+      element.textContent = '';
     }, 3000);
   }
 
@@ -213,7 +400,7 @@ class OptionsManager {
         text: '',
         startTime,
         endTime,
-        maxResults: 0
+        maxResults: 10000 // 设置更大的值，确保能获取足够多的记录
       }, resolve);
     });
   }
