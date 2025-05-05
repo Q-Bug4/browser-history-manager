@@ -2,6 +2,15 @@
 let BACKEND_URL = 'http://localhost:8080';
 // 是否启用高亮
 let highlightEnabled = true;
+// 保存当前的tooltip元素和定时器
+let currentTooltip = null;
+let tooltipTimer = null;
+// tooltip显示时间(毫秒)
+const TOOLTIP_DURATION = 2000;
+// 访问记录缓存（URL -> 记录）
+const visitCache = new Map();
+// 已处理的URL集合，避免重复处理
+const processedUrls = new Set();
 
 /**
  * 从链接元素获取正确的URL
@@ -29,26 +38,400 @@ function getFullUrl(link) {
 }
 
 /**
- * 高亮显示链接
+ * 高亮显示链接并添加事件处理
  * @param {HTMLAnchorElement} link 
+ * @param {Object} historyRecord 可选的历史记录信息
  */
-function highlightLink(link) {
+function highlightLink(link, historyRecord = null) {
+  if (!link || !link.href) return;
+  
+  console.log(`Highlighting link: ${link.href}`);
+  
+  // 防止重复处理
+  if (link.classList.contains('history-link-highlight')) {
+    return;
+  }
+  
   // 使用父元素包裹可能更有效
   // 但有些复杂页面可能破坏样式，所以这里直接添加样式到a标签
   link.classList.add('history-link-highlight');
   
   // 添加数据属性，方便调试
   link.dataset.visitedHighlight = 'true';
+  
+  // 存储历史记录信息（如果有）
+  if (historyRecord) {
+    // 使用data属性直接存储信息不安全，改用Map缓存
+    visitCache.set(link.href, historyRecord);
+  }
+  
+  // 确保移除旧的事件监听器
+  link.removeEventListener('mouseover', handleLinkMouseOver);
+  link.removeEventListener('mouseout', handleLinkMouseOut);
+  
+  // 添加新的事件监听器
+  link.addEventListener('mouseover', handleLinkMouseOver);
+  link.addEventListener('mouseout', handleLinkMouseOut);
+  
+  // 直接绑定事件处理函数作为备份方案
+  link.onmouseover = handleLinkMouseOver;
+  link.onmouseout = handleLinkMouseOut;
+  
+  console.log(`Event listeners added to link: ${link.href}`);
+}
+
+/**
+ * 为所有链接添加鼠标事件监听（无论是否高亮）
+ */
+function addEventListenersToAllLinks() {
+  console.log('Adding event listeners to all links');
+  const links = document.querySelectorAll('a');
+  links.forEach(link => {
+    const url = getFullUrl(link);
+    if (!url) return;
+    
+    // 确保移除旧的事件监听器
+    link.removeEventListener('mouseover', logLinkHover);
+    link.removeEventListener('mouseout', clearPendingOperations);
+    
+    // 添加监听器
+    link.addEventListener('mouseover', logLinkHover);
+    link.addEventListener('mouseout', clearPendingOperations);
+    
+    // 直接绑定事件处理函数作为备份方案
+    if (!link.onmouseover) {
+      link.onmouseover = logLinkHover;
+    }
+    if (!link.onmouseout) {
+      link.onmouseout = clearPendingOperations;
+    }
+  });
+}
+
+// 用于存储延迟检查计时器
+let hoverTimer = null;
+
+/**
+ * 记录链接悬停并检查访问状态
+ * @param {MouseEvent} event 
+ */
+function logLinkHover(event) {
+  const link = event.currentTarget;
+  if (!link || !link.href) return;
+  
+  console.log(`Mouse hover on link: ${link.href}`);
+  
+  // 如果是已知的高亮链接，使用现有的处理逻辑
+  if (link.classList.contains('history-link-highlight')) {
+    return;
+  }
+  
+  // 如果已经在缓存中，不需要再查询
+  if (visitCache.has(link.href)) {
+    console.log(`Link visit status cached: ${link.href} - visited`);
+    return;
+  }
+  
+  // 设置一个短暂延迟，避免频繁API调用
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => {
+    checkLinkVisitStatus(link);
+  }, 100);
+}
+
+/**
+ * 清除待处理的操作
+ */
+function clearPendingOperations() {
+  if (hoverTimer) {
+    clearTimeout(hoverTimer);
+    hoverTimer = null;
+  }
+}
+
+/**
+ * 检查链接是否被访问过
+ * @param {HTMLAnchorElement} link 
+ */
+async function checkLinkVisitStatus(link) {
+  if (!link || !link.href) return;
+  
+  console.log(`Checking visit status for: ${link.href}`);
+  
+  try {
+    // 构建查询参数
+    const urlToCheck = link.href;
+    const queryParams = new URLSearchParams({
+      keyword: urlToCheck,
+      pageSize: 1
+    });
+    
+    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
+    
+    // 打印请求详情
+    console.log(`📤 Link visit check request:`, {
+      method: 'GET',
+      url: apiUrl,
+      params: Object.fromEntries(queryParams.entries())
+    });
+    
+    // 发送请求
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch history: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // 打印响应详情
+    console.log(`📥 Link visit check response:`, JSON.stringify(data, null, 2));
+    
+    // 检查是否有匹配的记录
+    if (data.items && data.items.length > 0) {
+      console.log(`✓ Link has been visited: ${link.href}`);
+      const record = {
+        url: link.href,
+        lastVisitTime: data.items[0].timestamp,
+        visitCount: 1
+      };
+      visitCache.set(link.href, record);
+      
+      // 如果链接尚未高亮，可能需要刷新页面高亮
+      if (!link.classList.contains('history-link-highlight')) {
+        console.log(`Link should be highlighted: ${link.href}`);
+        highlightLink(link, record);
+      }
+    } else {
+      console.log(`✗ Link has not been visited: ${link.href}`);
+    }
+  } catch (error) {
+    console.error(`Error checking visit status for ${link.href}:`, error);
+  }
+}
+
+/**
+ * 鼠标悬停事件处理函数
+ * @param {MouseEvent} event 
+ */
+function handleLinkMouseOver(event) {
+  console.log("mouseover event triggered for:", event.currentTarget?.href);
+  
+  const link = event.currentTarget;
+  // 确保当前元素是高亮链接
+  if (!link || !link.classList.contains('history-link-highlight')) {
+    console.log('Link is not highlighted, skipping tooltip');
+    return;
+  }
+  
+  console.log(`Mouse over link: ${link.href}`);
+  
+  // 如果缓存中有记录，直接使用
+  if (visitCache.has(link.href)) {
+    const historyRecord = visitCache.get(link.href);
+    console.log(`Using cached history record:`, historyRecord);
+    showTooltip(event, historyRecord);
+    return;
+  }
+  
+  // 如果没有缓存，尝试从后端获取记录
+  getHistoryRecord(link.href)
+    .then(historyRecord => {
+      if (historyRecord) {
+        visitCache.set(link.href, historyRecord);
+        showTooltip(event, historyRecord);
+      } else {
+        console.log(`No history record found for ${link.href}`);
+        // 如果没有找到记录，仍然显示基本提示
+        showTooltip(event);
+      }
+    })
+    .catch(error => {
+      console.error(`Error fetching history for ${link.href}:`, error);
+    });
+}
+
+/**
+ * 鼠标移出事件处理函数
+ */
+function handleLinkMouseOut(event) {
+  console.log('Mouse out from link:', event.currentTarget?.href);
+  hideTooltip();
+}
+
+/**
+ * 获取单个URL的历史记录
+ * @param {string} url 
+ * @returns {Promise<Object|null>} 历史记录对象或null
+ */
+async function getHistoryRecord(url) {
+  try {
+    console.log(`Fetching history for URL: ${url}`);
+    
+    // 按照API规范构建查询参数
+    const queryParams = new URLSearchParams({
+      keyword: url,
+      pageSize: 1
+    });
+    
+    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
+    console.log(`API request: ${apiUrl}`);
+    
+    // 打印完整请求信息
+    console.log(`📤 Request details:`, {
+      method: 'GET',
+      url: apiUrl,
+      params: Object.fromEntries(queryParams.entries())
+    });
+    
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch history: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // 打印完整响应数据
+    console.log(`📥 Response data:`, JSON.stringify(data, null, 2));
+    
+    // 检查是否有匹配的记录
+    if (data.items && data.items.length > 0) {
+      return {
+        url: data.items[0].url,
+        lastVisitTime: data.items[0].timestamp,
+        visitCount: 1 // 假设访问次数为1，因为API可能不提供这个信息
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching history record:', error);
+    return null;
+  }
+}
+
+/**
+ * 显示已访问提示
+ * @param {MouseEvent} event 
+ * @param {Object} historyRecord 历史记录信息
+ */
+function showTooltip(event, historyRecord = null) {
+  if (!event || !event.currentTarget) {
+    console.error('Invalid event for tooltip');
+    return;
+  }
+  
+  const link = event.currentTarget;
+  console.log('Showing tooltip for link:', link.href);
+  
+  // 清除上一个tooltip和定时器
+  clearTooltip();
+  
+  // 创建tooltip元素
+  const tooltip = document.createElement('div');
+  tooltip.className = 'history-tooltip';
+  
+  // 如果有历史记录信息，显示详细信息
+  if (historyRecord && historyRecord.lastVisitTime) {
+    const visitDate = new Date(historyRecord.lastVisitTime);
+    const visitCount = historyRecord.visitCount || 1;
+    
+    tooltip.innerHTML = `
+      <div>上次访问时间: ${visitDate.toLocaleString()}</div>
+      <div>访问次数: ${visitCount}</div>
+    `;
+  } else {
+    tooltip.textContent = '您已经访问过此链接';
+  }
+  
+  document.body.appendChild(tooltip);
+  
+  // 获取链接位置
+  const linkRect = link.getBoundingClientRect();
+  const scrollY = window.scrollY || window.pageYOffset;
+  
+  // 设置tooltip位置 - 在链接正下方居中
+  tooltip.style.left = (linkRect.left + linkRect.width / 2) + 'px';
+  tooltip.style.top = (linkRect.bottom + scrollY + 10) + 'px';
+  
+  // 显示tooltip
+  setTimeout(() => {
+    tooltip.classList.add('show');
+  }, 10);
+  
+  // 保存当前tooltip引用
+  currentTooltip = tooltip;
+  
+  // 设置自动隐藏
+  tooltipTimer = setTimeout(() => {
+    hideTooltip();
+  }, TOOLTIP_DURATION);
+  
+  console.log('Tooltip created and displayed');
+}
+
+/**
+ * 隐藏提示
+ */
+function hideTooltip() {
+  console.log('Hiding tooltip');
+  
+  if (currentTooltip) {
+    currentTooltip.classList.remove('show');
+    
+    // 等待淡出动画完成后移除元素
+    setTimeout(() => {
+      if (currentTooltip && currentTooltip.parentNode) {
+        currentTooltip.parentNode.removeChild(currentTooltip);
+      }
+      currentTooltip = null;
+    }, 300);
+  }
+  
+  // 清除定时器
+  if (tooltipTimer) {
+    clearTimeout(tooltipTimer);
+    tooltipTimer = null;
+  }
+}
+
+/**
+ * 清除当前的tooltip
+ */
+function clearTooltip() {
+  hideTooltip();
+  
+  // 移除页面上所有的tooltip(以防有未清理的)
+  document.querySelectorAll('.history-tooltip').forEach(el => {
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  });
 }
 
 /**
  * 移除所有高亮
  */
 function removeAllHighlights() {
+  console.log('Removing all highlights');
+  
   document.querySelectorAll('.history-link-highlight').forEach(element => {
+    // 移除事件监听器
+    element.removeEventListener('mouseover', handleLinkMouseOver);
+    element.removeEventListener('mouseout', handleLinkMouseOut);
+    element.onmouseover = null;
+    element.onmouseout = null;
+    
+    // 移除样式类和属性
     element.classList.remove('history-link-highlight');
     delete element.dataset.visitedHighlight;
   });
+  
+  // 清除访问缓存
+  visitCache.clear();
+  processedUrls.clear();
+  
+  // 确保清除任何残留的tooltip
+  clearTooltip();
 }
 
 /**
@@ -60,46 +443,109 @@ async function checkUrlsInHistory(urls) {
   try {
     // 如果不启用高亮，直接返回空数组
     if (!highlightEnabled) {
+      console.log('Highlight is disabled, skipping history check');
       return [];
     }
     
-    // 获取当前域名
-    const domain = window.location.hostname;
+    console.log(`Checking ${urls.length} URLs in history...`);
     
-    // 先获取当前域名的所有记录
+    // 构建高效的API请求 - 根据API能力选择最优方法
+    // 使用当前页面域名查询相关记录
+    
+    const domain = window.location.hostname;
     const queryParams = new URLSearchParams({
       domain,
-      pageSize: 1000 // 获取大量记录
+      pageSize: 2000 // 尝试获取更多记录
     });
     
-    console.log(`Fetching history from ${BACKEND_URL}/api/history?${queryParams}`);
+    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
+    console.log(`Fetching history from ${apiUrl}`);
     
-    const response = await fetch(`${BACKEND_URL}/api/history?${queryParams}`);
+    // 打印完整请求信息
+    console.log(`📤 Batch request details:`, {
+      method: 'GET',
+      url: apiUrl,
+      params: Object.fromEntries(queryParams.entries())
+    });
+    
+    const response = await fetch(apiUrl);
     if (!response.ok) {
       throw new Error(`Failed to fetch history: ${response.status}`);
     }
     
     const data = await response.json();
+    
+    // 打印响应摘要（可能太大不适合完整打印）
+    console.log(`📥 Batch response summary:`, {
+      total: data.total || 0,
+      itemCount: data.items?.length || 0,
+      firstFewItems: data.items?.slice(0, 3) || []
+    });
+    
+    // 如果需要完整响应数据，取消下面的注释
+    console.log(`📥 Complete batch response data:`, JSON.stringify(data, null, 2));
+    
+    if (!data.items || !Array.isArray(data.items)) {
+      console.error('Invalid response format:', data);
+      return [];
+    }
+    
     console.log(`Retrieved ${data.items.length} history records for domain ${domain}`);
     
-    const historyUrls = data.items.map(item => item.url);
+    // 创建一个Set来快速查找历史URL
+    const historyUrlSet = new Set();
+    const historyMap = new Map();
     
-    // 找出存在于历史记录中的URL
-    const matchedUrls = urls.filter(url => {
-      if (!url) return false;
+    // 预处理历史记录
+    data.items.forEach(item => {
+      if (!item || !item.url) return;
       
-      return historyUrls.some(historyUrl => {
-        // 处理URL差异：去除末尾斜杠、查询参数等
-        const normalizedUrl = normalizeUrl(url);
-        const normalizedHistoryUrl = normalizeUrl(historyUrl);
-        
-        const isMatch = normalizedUrl === normalizedHistoryUrl;
-        if (isMatch) {
-          console.log(`Match found for ${url}`);
-        }
-        return isMatch;
+      // 存储原始URL
+      historyUrlSet.add(item.url);
+      historyMap.set(item.url, {
+        url: item.url,
+        lastVisitTime: item.timestamp,
+        visitCount: 1
       });
+      
+      // 存储规范化后的URL，以便更好地匹配
+      const normalizedUrl = normalizeUrl(item.url);
+      if (normalizedUrl !== item.url) {
+        historyUrlSet.add(normalizedUrl);
+        historyMap.set(normalizedUrl, {
+          url: item.url,
+          lastVisitTime: item.timestamp,
+          visitCount: 1  
+        });
+      }
     });
+    
+    console.log(`Normalized history set has ${historyUrlSet.size} entries`);
+    
+    // 匹配页面上的URL
+    const matchedUrls = [];
+    
+    for (const url of urls) {
+      if (!url) continue;
+      
+      // 检查原始URL是否在历史记录中
+      if (historyUrlSet.has(url)) {
+        console.log(`✓ Direct match for URL: ${url}`);
+        matchedUrls.push(url);
+        visitCache.set(url, historyMap.get(url));
+        continue;
+      }
+      
+      // 尝试规范化URL进行匹配
+      const normalizedUrl = normalizeUrl(url);
+      if (historyUrlSet.has(normalizedUrl)) {
+        console.log(`✓ Normalized match for URL: ${url} -> ${normalizedUrl}`);
+        matchedUrls.push(url);
+        visitCache.set(url, historyMap.get(normalizedUrl));
+      } else {
+        console.log(`✗ No match for URL: ${url}`);
+      }
+    }
     
     console.log(`Found ${matchedUrls.length} matches out of ${urls.length} URLs`);
     return matchedUrls;
@@ -117,14 +563,26 @@ async function checkUrlsInHistory(urls) {
 function normalizeUrl(url) {
   try {
     const parsed = new URL(url);
-    // 移除末尾斜杠
-    let normalized = parsed.origin + parsed.pathname.replace(/\/$/, '');
-    // 保留查询参数但移除碎片标识符
+    
+    // 提取基本URL组件
+    let normalized = parsed.origin;
+    
+    // 处理路径 - 移除末尾斜杠
+    let path = parsed.pathname;
+    if (path.endsWith('/') && path !== '/') {
+      path = path.slice(0, -1);
+    }
+    normalized += path;
+    
+    // 保留查询参数
     if (parsed.search) {
       normalized += parsed.search;
     }
+    
+    // 转换为小写 - 域名部分大小写不敏感
     return normalized.toLowerCase();
   } catch (e) {
+    console.error(`Error normalizing URL: ${url}`, e);
     return url.toLowerCase();
   }
 }
@@ -162,17 +620,43 @@ async function processLinks() {
   
   if (uniqueUrls.length === 0) return;
   
-  // 批量检查URL
-  const historyUrls = await checkUrlsInHistory(uniqueUrls);
+  // 批量检查URL，排除已处理的URL
+  const newUrls = uniqueUrls.filter(url => !processedUrls.has(url));
+  console.log(`${newUrls.length} new URLs to check (excluded ${uniqueUrls.length - newUrls.length} already processed)`);
+  
+  // 记录已处理的URL
+  newUrls.forEach(url => processedUrls.add(url));
+  
+  // 批量检查新URL
+  const historyUrls = await checkUrlsInHistory(newUrls);
   
   // 高亮历史链接
   historyUrls.forEach(url => {
     const elements = urlMap.get(url) || [];
-    console.log(`Highlighting ${elements.length} elements for URL ${url}`);
-    elements.forEach(highlightLink);
+    const record = visitCache.get(url);
+    console.log(`Highlighting ${elements.length} elements for URL ${url}`, record);
+    elements.forEach(link => highlightLink(link, record));
   });
   
   console.log('Finished processing links');
+  
+  // 为所有链接添加鼠标事件监听器，以便记录所有访问状态
+  addEventListenersToAllLinks();
+  
+  // 检查是否所有高亮链接都具有正确的事件监听器
+  setTimeout(() => {
+    const highlightedLinks = document.querySelectorAll('.history-link-highlight');
+    console.log(`Verifying ${highlightedLinks.length} highlighted links have event listeners`);
+    
+    highlightedLinks.forEach(link => {
+      // 再次确保事件监听器已绑定
+      if (!link.onmouseover || !link.onmouseout) {
+        console.log(`Fixing missing event listeners on ${link.href}`);
+        link.onmouseover = handleLinkMouseOver;
+        link.onmouseout = handleLinkMouseOut;
+      }
+    });
+  }, 500);
 }
 
 /**
@@ -214,6 +698,30 @@ function observeDOMChanges() {
 }
 
 /**
+ * 验证所有高亮链接是否有正确的事件监听器
+ */
+function verifyEventListeners() {
+  const highlightedLinks = document.querySelectorAll('.history-link-highlight');
+  console.log(`Verifying event listeners for ${highlightedLinks.length} highlighted links`);
+  
+  highlightedLinks.forEach(link => {
+    const hasOnMouseover = typeof link.onmouseover === 'function';
+    const hasOnMouseout = typeof link.onmouseout === 'function';
+    
+    if (!hasOnMouseover || !hasOnMouseout) {
+      console.log(`Link ${link.href} is missing events:`, 
+        hasOnMouseover ? 'has mouseover' : 'no mouseover',
+        hasOnMouseout ? 'has mouseout' : 'no mouseout');
+      
+      // 重新添加事件
+      console.log(`Re-adding event listeners to link: ${link.href}`);
+      link.onmouseover = handleLinkMouseOver;
+      link.onmouseout = handleLinkMouseOut;
+    }
+  });
+}
+
+/**
  * 初始化: 从存储中获取配置并开始处理
  */
 async function initialize() {
@@ -230,6 +738,15 @@ async function initialize() {
     }
     
     console.log(`Using backend URL: ${BACKEND_URL}, highlight enabled: ${highlightEnabled}`);
+    
+    // 打印当前扩展配置
+    console.log('📋 Extension configuration:', {
+      backendUrl: BACKEND_URL,
+      highlightEnabled: highlightEnabled,
+      tooltipDuration: TOOLTIP_DURATION,
+      currentPage: window.location.href,
+      domain: window.location.hostname
+    });
     
     // 开始处理链接
     if (document.readyState === 'loading') {
@@ -248,7 +765,9 @@ async function initialize() {
     if (changes.backendUrl) {
       BACKEND_URL = changes.backendUrl.newValue;
       console.log(`Backend URL updated: ${BACKEND_URL}`);
-      // 重新处理链接
+      // 清除缓存并重新处理链接
+      visitCache.clear();
+      processedUrls.clear();
       processLinks();
     }
     
@@ -271,6 +790,9 @@ async function initialize() {
     }
     return true;
   });
+  
+  // 在页面卸载时清理tooltip
+  window.addEventListener('beforeunload', clearTooltip);
 }
 
 // 启动
