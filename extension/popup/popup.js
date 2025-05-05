@@ -8,7 +8,6 @@ class PopupManager {
     this.cacheStatus = document.getElementById('cacheStatus');
     this.filterToggle = document.getElementById('filterInternalAddresses');
     this.notificationToggle = document.getElementById('showFailureNotifications');
-    this.highlightToggle = document.getElementById('highlightVisitedLinks');
     
     this.initializeUI();
     
@@ -23,7 +22,6 @@ class PopupManager {
     const config = await ConfigManager.getConfig();
     this.filterToggle.checked = config.filterInternalAddresses;
     this.notificationToggle.checked = config.showFailureNotifications;
-    this.highlightToggle.checked = config.highlightVisitedLinks;
     this.backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
     
     // Add event listeners
@@ -36,25 +34,6 @@ class PopupManager {
     this.notificationToggle.addEventListener('change', async (e) => {
       await ConfigManager.updateConfig({
         showFailureNotifications: e.target.checked
-      });
-    });
-    
-    this.highlightToggle.addEventListener('change', async (e) => {
-      await ConfigManager.updateConfig({
-        highlightVisitedLinks: e.target.checked
-      });
-      
-      // 向所有标签页发送消息，通知设置变更
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-          chrome.tabs.sendMessage(tab.id, {
-            type: 'HIGHLIGHT_SETTING_CHANGED',
-            enabled: e.target.checked
-          }).catch(err => {
-            // 内容脚本可能还未加载，忽略错误
-            console.log(`Failed to send message to tab ${tab.id}:`, err);
-          });
-        });
       });
     });
     
