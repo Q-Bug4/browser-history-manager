@@ -1,6 +1,6 @@
 import { HistoryDB } from '../utils/db.js';
-import { BACKEND_URL } from '../utils/constants.js';
 import { ConfigManager } from '../utils/config.js';
+import { DEFAULT_CONFIG } from '../utils/constants.js';
 
 class PopupManager {
   constructor() {
@@ -22,6 +22,7 @@ class PopupManager {
     const config = await ConfigManager.getConfig();
     this.filterToggle.checked = config.filterInternalAddresses;
     this.notificationToggle.checked = config.showFailureNotifications;
+    this.backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
     
     // Add event listeners
     this.filterToggle.addEventListener('change', async (e) => {
@@ -42,7 +43,7 @@ class PopupManager {
   async updateStatus() {
     // 更新连接状态
     try {
-      const response = await fetch(`${BACKEND_URL}/api/health`);
+      const response = await fetch(`${this.backendUrl}/api/health`);
       console.log('Backend health check response:', response);
       if (response.ok) {
         this.connectionStatus.textContent = 'Connected to backend';

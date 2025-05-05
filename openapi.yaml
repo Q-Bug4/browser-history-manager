@@ -1,0 +1,231 @@
+openapi: 3.0.3
+info:
+  title: History Manager API
+  description: API for managing browser history records
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local Development Server
+
+tags:
+  - name: history
+    description: Browser History API operations
+
+paths:
+  /api/health:
+    get:
+      summary: Check service health
+      description: Verify if the service is up and running
+      operationId: getHealth
+      tags:
+        - health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: string
+                example: "OK"
+
+  /api/history:
+    get:
+      summary: Search browser history
+      description: Search and filter browser history records
+      operationId: searchHistory
+      tags:
+        - history
+      parameters:
+        - name: keyword
+          in: query
+          description: Search keyword for URL content
+          schema:
+            type: string
+          example: google
+        - name: domain
+          in: query
+          description: Filter by specific domain
+          schema:
+            type: string
+          example: example.com
+        - name: startDate
+          in: query
+          description: Start date for records (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+          example: 2023-01-01
+        - name: endDate
+          in: query
+          description: End date for records (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+          example: 2023-12-31
+        - name: page
+          in: query
+          description: Page number for pagination
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          example: 1
+        - name: pageSize
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 30
+          example: 30
+      responses:
+        '200':
+          description: Successfully retrieved history records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+        '400':
+          description: Bad request - invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    
+    post:
+      summary: Report browser history
+      description: Add a new browser history record
+      operationId: reportHistory
+      tags:
+        - history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistoryRequest'
+      responses:
+        '200':
+          description: History record added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HistoryRecord:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: When the page was visited
+          example: 2023-03-19T10:30:00Z
+        url:
+          type: string
+          description: Full URL of the visited page
+          example: https://example.com/page?param=value
+        domain:
+          type: string
+          description: Domain of the visited page
+          example: example.com
+      required:
+        - timestamp
+        - url
+        - domain
+    
+    HistoryRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          description: Full URL of the visited page
+          example: https://example.com/page?param=value
+        timestamp:
+          type: string
+          format: date-time
+          description: When the page was visited
+          example: 2023-03-19T10:30:00Z
+        domain:
+          type: string
+          description: Domain of the visited page
+          example: example.com
+      required:
+        - url
+        - timestamp
+        - domain
+    
+    HistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryRecord'
+          description: List of history records
+        total:
+          type: integer
+          description: Total number of records matching the query
+          example: 150
+        page:
+          type: integer
+          description: Current page number
+          example: 1
+        pageSize:
+          type: integer
+          description: Number of items per page
+          example: 30
+      required:
+        - items
+        - total
+        - page
+        - pageSize
+    
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          example: success
+        message:
+          type: string
+          description: Success message
+          example: Record added successfully
+      required:
+        - status
+    
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Status of the operation
+          example: error
+        message:
+          type: string
+          description: Error message
+          example: Failed to store record
+      required:
+        - status
+        - message 

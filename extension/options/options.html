@@ -9,39 +9,99 @@
   <div class="container">
     <h1>Browser History Manager Settings</h1>
     
-    <section class="pending-records">
-      <h2>Pending Records</h2>
-      <div class="records-info">
-        <span id="pendingCount">Loading...</span>
-        <button id="retryAll">Retry All</button>
-      </div>
-      <div id="recordsList" class="records-list">
-        <!-- Records will be inserted here -->
-      </div>
-    </section>
+    <div class="tabs">
+      <button class="tab-button active" data-tab="general">General</button>
+      <button class="tab-button" data-tab="sync">Sync</button>
+      <button class="tab-button" data-tab="system">System</button>
+    </div>
+    
+    <!-- 通用设置选项卡 -->
+    <div class="tab-content active" id="general-tab">
+      <section class="server-settings">
+        <h2>Server Settings</h2>
+        <div class="setting-item">
+          <label for="backendUrl">Backend URL:</label>
+          <input type="text" id="backendUrl" class="full-width">
+          <button id="saveBackendUrl">Save</button>
+          <span id="urlStatus" class="status-text"></span>
+        </div>
+        
+        <div class="setting-item">
+          <label>
+            <input type="checkbox" id="highlightToggle">
+            Highlight visited links
+          </label>
+          <p class="setting-desc">When enabled, links that you've visited before will be highlighted with a blue border.</p>
+          <button id="saveHighlight">Save</button>
+          <span id="highlightStatus" class="status-text"></span>
+        </div>
+      </section>
+    </div>
+    
+    <!-- 同步选项卡 -->
+    <div class="tab-content" id="sync-tab">
+      <section class="pending-records">
+        <h2>Pending Records</h2>
+        <div class="records-info">
+          <span id="pendingCount">Loading...</span>
+          <button id="retryAll">Sync All Pending Records</button>
+        </div>
+        <div id="recordsList" class="records-list">
+          <!-- Records will be inserted here -->
+        </div>
+      </section>
 
-    <section class="manual-sync">
-      <h2>Manual Sync</h2>
-      <div class="sync-controls">
-        <div class="date-range">
-          <label>
-            From:
-            <input type="datetime-local" id="syncStartTime">
-          </label>
-          <label>
-            To:
-            <input type="datetime-local" id="syncEndTime">
-          </label>
+      <section class="manual-sync">
+        <h2>Manual Sync</h2>
+        <div class="sync-controls">
+          <div class="date-range">
+            <label>
+              From:
+              <input type="datetime-local" id="syncStartTime">
+            </label>
+            <label>
+              To:
+              <input type="datetime-local" id="syncEndTime">
+            </label>
+          </div>
+          <button id="startSync">Start Sync</button>
         </div>
-        <button id="startSync">Start Sync</button>
-      </div>
-      <div id="syncProgress" class="sync-progress">
-        <div class="progress-bar">
-          <div class="progress-fill"></div>
+        <div id="syncProgress" class="sync-progress">
+          <div class="progress-bar">
+            <div class="progress-fill"></div>
+          </div>
+          <div class="progress-text"></div>
         </div>
-        <div class="progress-text"></div>
-      </div>
-    </section>
+      </section>
+    </div>
+    
+    <!-- 系统设置选项卡 -->
+    <div class="tab-content" id="system-tab">
+      <section class="system-settings">
+        <h2>System Settings</h2>
+        
+        <div class="setting-item">
+          <label for="logLevel">Log Level:</label>
+          <select id="logLevel">
+            <option value="0">DEBUG - All logs</option>
+            <option value="1">INFO - Standard information</option>
+            <option value="2">WARN - Warnings and errors</option>
+            <option value="3">ERROR - Only errors</option>
+            <option value="4">NONE - No logging</option>
+          </select>
+          <button id="saveLogLevel">Save</button>
+          <span id="logLevelStatus" class="status-text"></span>
+          <p class="setting-desc">Set logging verbosity level for extension components.</p>
+        </div>
+        
+        <div class="setting-item">
+          <h3>Current Settings</h3>
+          <div id="currentSettings" class="settings-display">
+            <!-- Current settings will be displayed here -->
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
   <script src="options.js" type="module"></script>
 </body>

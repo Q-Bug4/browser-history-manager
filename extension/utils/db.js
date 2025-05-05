@@ -41,7 +41,7 @@ export class HistoryDB {
     });
   }
 
-  async getFailedRecords(limit = 50) {
+  async getFailedRecords(limit = 0) {
     await this.init();
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction([this.storeName], 'readonly');
