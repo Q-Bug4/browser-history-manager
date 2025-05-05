@@ -1,0 +1,22 @@
+.history-link-highlight {
+  border: 2px solid #2196F3 !important;
+  padding: 2px !important;
+  box-shadow: 0 0 3px rgba(33, 150, 243, 0.5) !important;
+  border-radius: 3px !important;
+  transition: all 0.3s ease !important;
+  background-color: rgba(33, 150, 243, 0.05) !important;
+  display: inline-block !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.history-link-highlight:hover {
+  box-shadow: 0 0 6px rgba(33, 150, 243, 0.8) !important;
+  background-color: rgba(33, 150, 243, 0.1) !important;
+}
+
+/* 特殊处理某些复杂的链接元素 */
+a[data-hydro-click].history-link-highlight {
+  border: 3px solid #2196F3 !important;
+  padding: 3px !important;
+} 

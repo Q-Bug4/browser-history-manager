@@ -1,5 +1,5 @@
 import { HistoryDB } from '../utils/db.js';
-import { BACKEND_URL, RETRY_INTERVAL, BATCH_SIZE } from '../utils/constants.js';
+import { RETRY_INTERVAL, BATCH_SIZE, DEFAULT_CONFIG } from '../utils/constants.js';
 import { ConfigManager } from '../utils/config.js';
 
 const db = new HistoryDB();
@@ -54,7 +54,10 @@ function isInternalAddress(hostname) {
 
 // 上报到后端
 async function reportToBackend(record) {
-  const response = await fetch(`${BACKEND_URL}/api/history`, {
+  const config = await ConfigManager.getConfig();
+  const backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
+  
+  const response = await fetch(`${backendUrl}/api/history`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -1,33 +1,105 @@
 import { HistoryDB } from '../utils/db.js';
-import { BACKEND_URL, BATCH_SIZE } from '../utils/constants.js';
+import { BATCH_SIZE, DEFAULT_CONFIG } from '../utils/constants.js';
+import { ConfigManager } from '../utils/config.js';
 
 class OptionsManager {
   constructor() {
     this.db = new HistoryDB();
+    this.backendUrl = '';
     this.initializeElements();
+    this.loadConfig();
     this.attachEventListeners();
     this.loadPendingRecords();
   }
 
   initializeElements() {
+    // 后端URL配置元素
+    this.backendUrlInput = document.getElementById('backendUrl');
+    this.saveBackendUrlButton = document.getElementById('saveBackendUrl');
+    this.urlStatus = document.getElementById('urlStatus');
+    
+    // 失败记录元素
     this.pendingCount = document.getElementById('pendingCount');
     this.recordsList = document.getElementById('recordsList');
     this.retryAllButton = document.getElementById('retryAll');
+    
+    // 同步控制元素
     this.syncStartTime = document.getElementById('syncStartTime');
     this.syncEndTime = document.getElementById('syncEndTime');
     this.startSyncButton = document.getElementById('startSync');
     this.syncProgress = document.getElementById('syncProgress');
     
-    // Set default date range (last 7 days)
+    // 设置默认日期范围 (最近7天)
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     this.syncEndTime.value = now.toISOString().slice(0, 16);
     this.syncStartTime.value = weekAgo.toISOString().slice(0, 16);
   }
 
+  async loadConfig() {
+    const config = await ConfigManager.getConfig();
+    this.backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
+    this.backendUrlInput.value = this.backendUrl;
+  }
+
   attachEventListeners() {
+    this.saveBackendUrlButton.addEventListener('click', () => this.saveBackendUrl());
     this.retryAllButton.addEventListener('click', () => this.retryAllRecords());
     this.startSyncButton.addEventListener('click', () => this.startManualSync());
+    
+    // 输入框按回车也触发保存
+    this.backendUrlInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        this.saveBackendUrl();
+      }
+    });
+  }
+  
+  async saveBackendUrl() {
+    const newUrl = this.backendUrlInput.value.trim();
+    if (!newUrl) {
+      this.showUrlStatus('URL cannot be empty', false);
+      return;
+    }
+    
+    try {
+      // 尝试验证URL格式
+      new URL(newUrl);
+      
+      // 尝试连接到健康检查端点
+      try {
+        const response = await fetch(`${newUrl}/api/health`);
+        if (response.ok) {
+          this.showUrlStatus('Connection successful', true);
+        } else {
+          this.showUrlStatus('Backend responded with error', false);
+          return;
+        }
+      } catch (error) {
+        this.showUrlStatus('Failed to connect to backend', false);
+        return;
+      }
+      
+      // 保存URL到配置
+      await ConfigManager.updateConfig({ backendUrl: newUrl });
+      this.backendUrl = newUrl;
+      
+      // 更新本地存储以便content script可以访问
+      chrome.storage.local.set({ backendUrl: newUrl });
+      
+    } catch (error) {
+      this.showUrlStatus('Invalid URL format', false);
+    }
+  }
+  
+  showUrlStatus(message, isSuccess) {
+    this.urlStatus.textContent = message;
+    this.urlStatus.className = isSuccess ? 'status-text success' : 'status-text error';
+    
+    // 3秒后清除状态
+    setTimeout(() => {
+      this.urlStatus.textContent = '';
+    }, 3000);
   }
 
   async loadPendingRecords() {
@@ -147,7 +219,10 @@ class OptionsManager {
   }
 
   async reportToBackend(record) {
-    const response = await fetch(`${BACKEND_URL}/api/history`, {
+    const config = await ConfigManager.getConfig();
+    const backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
+    
+    const response = await fetch(`${backendUrl}/api/history`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

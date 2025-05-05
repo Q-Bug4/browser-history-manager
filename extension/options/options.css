@@ -21,6 +21,40 @@ h2 {
   color: #444;
 }
 
+.setting-item {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setting-item label {
+  margin-right: 10px;
+  min-width: 100px;
+}
+
+.full-width {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+
+.status-text {
+  margin-left: 10px;
+  font-size: 14px;
+}
+
+.status-text.success {
+  color: #4CAF50;
+}
+
+.status-text.error {
+  color: #f44336;
+}
+
 .records-info {
   display: flex;
   justify-content: space-between;
