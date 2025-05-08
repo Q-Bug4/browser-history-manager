@@ -1,10 +1,12 @@
 import { HistoryDB } from '../utils/db.js';
 import { BATCH_SIZE, DEFAULT_CONFIG, LOG_LEVELS, LOG_LEVEL_NAMES } from '../utils/constants.js';
 import { ConfigManager } from '../utils/config.js';
+import { HistoryManager } from '../core/history-manager.js';
 
 class OptionsManager {
   constructor() {
     this.db = new HistoryDB();
+    this.historyManager = new HistoryManager();
     this.backendUrl = '';
     this.logLevel = DEFAULT_CONFIG.logLevel;
     this.highlightEnabled = DEFAULT_CONFIG.highlightVisitedLinks;
@@ -382,7 +384,7 @@ class OptionsManager {
       const record = records.find(r => r.timestamp === timestamp);
       if (record) {
         try {
-          await this.reportToBackend(record);
+          await this.historyManager.reportHistory(record);
           await this.db.removeRecords([timestamp]);
           await this.loadPendingRecords(); // Refresh the list
         } catch (error) {
@@ -400,7 +402,7 @@ class OptionsManager {
 
       for (const record of records) {
         try {
-          await this.reportToBackend(record);
+          await this.historyManager.reportHistory(record);
           successfulTimestamps.push(record.timestamp);
         } catch (error) {
           console.error('Failed to retry record:', error);
@@ -443,7 +445,7 @@ class OptionsManager {
             domain: new URL(item.url).hostname
           };
 
-          await this.reportToBackend(record);
+          await this.historyManager.reportHistory(record);
           processed++;
           
           // Update progress
@@ -475,23 +477,6 @@ class OptionsManager {
         maxResults: 10000 // 设置更大的值，确保能获取足够多的记录
       }, resolve);
     });
-  }
-
-  async reportToBackend(record) {
-    const config = await ConfigManager.getConfig();
-    const backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
-    
-    const response = await fetch(`${backendUrl}/api/history`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(record)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to report history: ${response.statusText}`);
-    }
   }
 }
 

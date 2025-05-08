@@ -11,6 +11,8 @@ const TOOLTIP_DURATION = 2000;
 const visitCache = new Map();
 // 已处理的URL集合，避免重复处理
 const processedUrls = new Set();
+// 历史记录管理器
+let historyManager = null;
 
 // 日志级别常量
 const LOG_LEVELS = {
@@ -87,25 +89,31 @@ function getFullUrl(link) {
  * @param {Object} historyRecord 可选的历史记录信息
  */
 function highlightLink(link, historyRecord = null) {
-  if (!link || !link.href) return;
-  
-  logger.debug(`Highlighting link: ${link.href}`);
-  
-  // 防止重复处理
-  if (link.classList.contains('history-link-highlight')) {
+  if (!link || !link.href) {
+    console.log('Invalid link element:', link);
     return;
   }
   
-  // 使用父元素包裹可能更有效
-  // 但有些复杂页面可能破坏样式，所以这里直接添加样式到a标签
+  console.log(`Highlighting link: ${link.href}`);
+  
+  // 防止重复处理
+  if (link.classList.contains('history-link-highlight')) {
+    console.log('Link already highlighted:', link.href);
+    return;
+  }
+  
+  // 添加高亮样式
   link.classList.add('history-link-highlight');
+  link.style.color = '#9c27b0'; // 紫色
+  link.style.textDecoration = 'underline';
+  link.style.fontWeight = 'bold';
   
   // 添加数据属性，方便调试
   link.dataset.visitedHighlight = 'true';
   
   // 存储历史记录信息（如果有）
   if (historyRecord) {
-    // 使用data属性直接存储信息不安全，改用Map缓存
+    console.log('Storing history record for link:', link.href, historyRecord);
     visitCache.set(link.href, historyRecord);
   }
   
@@ -121,7 +129,7 @@ function highlightLink(link, historyRecord = null) {
   link.onmouseover = handleLinkMouseOver;
   link.onmouseout = handleLinkMouseOut;
   
-  logger.debug(`Event listeners added to link: ${link.href}`);
+  console.log(`Event listeners added to link: ${link.href}`);
 }
 
 /**
@@ -202,51 +210,22 @@ async function checkLinkVisitStatus(link) {
   
   logger.debug(`Checking visit status for: ${link.href}`);
   
+  if (!historyManager) {
+    logger.error('HistoryManager not initialized');
+    return;
+  }
+  
   try {
-    // 规范化URL
-    const normalizedUrl = normalizeUrl(link.href);
-    logger.debug(`Normalized URL for query: ${normalizedUrl}`);
+    const historyRecord = await historyManager.getHistoryRecord(link.href);
     
-    // 构建查询参数
-    const queryParams = new URLSearchParams({
-      keyword: normalizedUrl,
-      pageSize: 1
-    });
-    
-    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
-    
-    // 打印请求详情
-    logger.debug(`📤 Link visit check request:`, {
-      method: 'GET',
-      url: apiUrl,
-      params: Object.fromEntries(queryParams.entries())
-    });
-    
-    // 发送请求
-    const response = await fetch(apiUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch history: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // 打印响应详情
-    logger.debug(`📥 Link visit check response:`, JSON.stringify(data, null, 2));
-    
-    // 检查是否有匹配的记录
-    if (data.items && data.items.length > 0) {
+    if (historyRecord) {
       logger.debug(`✓ Link has been visited: ${link.href}`);
-      const record = {
-        url: link.href,
-        lastVisitTime: data.items[0].timestamp,
-        visitCount: 1
-      };
-      visitCache.set(link.href, record);
+      visitCache.set(link.href, historyRecord);
       
       // 如果链接尚未高亮，可能需要刷新页面高亮
       if (!link.classList.contains('history-link-highlight')) {
         logger.debug(`Link should be highlighted: ${link.href}`);
-        highlightLink(link, record);
+        highlightLink(link, historyRecord);
       }
     } else {
       logger.debug(`✗ Link has not been visited: ${link.href}`);
@@ -311,53 +290,7 @@ function handleLinkMouseOut(event) {
  * @returns {Promise<Object|null>} 历史记录对象或null
  */
 async function getHistoryRecord(url) {
-  try {
-    logger.debug(`Fetching history for URL: ${url}`);
-    
-    // 规范化URL
-    const normalizedUrl = normalizeUrl(url);
-    logger.debug(`Normalized URL for query: ${normalizedUrl}`);
-    
-    // 按照API规范构建查询参数
-    const queryParams = new URLSearchParams({
-      keyword: normalizedUrl,
-      pageSize: 1
-    });
-    
-    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
-    logger.debug(`API request: ${apiUrl}`);
-    
-    // 打印完整请求信息
-    logger.debug(`📤 Request details:`, {
-      method: 'GET',
-      url: apiUrl,
-      params: Object.fromEntries(queryParams.entries())
-    });
-    
-    const response = await fetch(apiUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch history: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // 打印完整响应数据
-    logger.debug(`📥 Response data:`, JSON.stringify(data, null, 2));
-    
-    // 检查是否有匹配的记录
-    if (data.items && data.items.length > 0) {
-      return {
-        url: data.items[0].url,
-        lastVisitTime: data.items[0].timestamp,
-        visitCount: 1 // 假设访问次数为1，因为API可能不提供这个信息
-      };
-    }
-    
-    return null;
-  } catch (error) {
-    logger.error('Error fetching history record:', error);
-    return null;
-  }
+  return historyManager.getHistoryRecord(url);
 }
 
 /**
@@ -500,104 +433,23 @@ async function checkUrlsInHistory(urls) {
       return [];
     }
     
-    logger.info(`Checking ${urls.length} URLs in history...`);
-    
-    // 构建高效的API请求 - 根据API能力选择最优方法
-    // 使用当前页面域名查询相关记录
-    
-    const domain = window.location.hostname;
-    const queryParams = new URLSearchParams({
-      domain,
-      pageSize: 2000 // 尝试获取更多记录
-    });
-    
-    const apiUrl = `${BACKEND_URL}/api/history?${queryParams}`;
-    logger.debug(`Fetching history from ${apiUrl}`);
-    
-    // 打印完整请求信息
-    logger.debug(`📤 Batch request details:`, {
-      method: 'GET',
-      url: apiUrl,
-      params: Object.fromEntries(queryParams.entries())
-    });
-    
-    const response = await fetch(apiUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch history: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // 打印响应摘要（可能太大不适合完整打印）
-    logger.debug(`📥 Batch response summary:`, {
-      total: data.total || 0,
-      itemCount: data.items?.length || 0,
-      firstFewItems: data.items?.slice(0, 3) || []
-    });
-    
-    // 如果需要完整响应数据，取消下面的注释
-    logger.debug(`📥 Complete batch response data:`, JSON.stringify(data, null, 2));
-    
-    if (!data.items || !Array.isArray(data.items)) {
-      logger.error('Invalid response format:', data);
+    if (!historyManager) {
+      logger.error('HistoryManager not initialized');
       return [];
     }
     
-    logger.info(`Retrieved ${data.items.length} history records for domain ${domain}`);
+    logger.info(`Checking ${urls.length} URLs in history...`);
     
-    // 创建一个Set来快速查找历史URL
-    const historyUrlSet = new Set();
-    const historyMap = new Map();
+    // 使用历史记录管理器批量查询
+    const domain = window.location.hostname;
+    const historyMap = await historyManager.batchGetHistoryRecords(urls, domain);
     
-    // 预处理历史记录
-    data.items.forEach(item => {
-      if (!item || !item.url) return;
-      
-      // 存储原始URL
-      historyUrlSet.add(item.url);
-      historyMap.set(item.url, {
-        url: item.url,
-        lastVisitTime: item.timestamp,
-        visitCount: 1
-      });
-      
-      // 存储规范化后的URL，以便更好地匹配
-      const normalizedUrl = normalizeUrl(item.url);
-      if (normalizedUrl !== item.url) {
-        historyUrlSet.add(normalizedUrl);
-        historyMap.set(normalizedUrl, {
-          url: item.url,
-          lastVisitTime: item.timestamp,
-          visitCount: 1  
-        });
-      }
-    });
+    // 转换为URL数组
+    const matchedUrls = Array.from(historyMap.keys());
     
-    logger.debug(`Normalized history set has ${historyUrlSet.size} entries`);
-    
-    // 匹配页面上的URL
-    const matchedUrls = [];
-    
-    for (const url of urls) {
-      if (!url) continue;
-      
-      // 检查原始URL是否在历史记录中
-      if (historyUrlSet.has(url)) {
-        logger.debug(`✓ Direct match for URL: ${url}`);
-        matchedUrls.push(url);
-        visitCache.set(url, historyMap.get(url));
-        continue;
-      }
-      
-      // 尝试规范化URL进行匹配
-      const normalizedUrl = normalizeUrl(url);
-      if (historyUrlSet.has(normalizedUrl)) {
-        logger.debug(`✓ Normalized match for URL: ${url} -> ${normalizedUrl}`);
-        matchedUrls.push(url);
-        visitCache.set(url, historyMap.get(normalizedUrl));
-      } else {
-        logger.debug(`✗ No match for URL: ${url}`);
-      }
+    // 更新缓存
+    for (const [url, record] of historyMap.entries()) {
+      visitCache.set(url, record);
     }
     
     logger.info(`Found ${matchedUrls.length} matches out of ${urls.length} URLs`);
@@ -608,51 +460,6 @@ async function checkUrlsInHistory(urls) {
   }
 }
 
-/**
- * 规范化URL，使用模式映射
- * @param {string} url 
- * @returns {string} 规范化后的URL
- */
-function normalizeUrl(url) {
-  try {
-    // 尝试使用模式映射
-    for (const [pattern, replacement] of Object.entries(urlPatternMap)) {
-      try {
-        const regex = new RegExp(pattern);
-        if (regex.test(url)) {
-          const normalized = url.replace(regex, replacement);
-          logger.debug(`URL normalized using pattern: ${url} -> ${normalized}`);
-          return normalized.toLowerCase();
-        }
-      } catch (e) {
-        logger.error(`Invalid regex pattern: ${pattern}`, e);
-      }
-    }
-    
-    // 如果没有匹配的模式，使用基本规范化
-    const parsed = new URL(url);
-    
-    // 提取基本URL组件
-    let normalized = parsed.origin;
-    
-    // 处理路径 - 移除末尾斜杠
-    let path = parsed.pathname;
-    if (path.endsWith('/') && path !== '/') {
-      path = path.slice(0, -1);
-    }
-    normalized += path;
-    
-    // 保留查询参数
-    if (parsed.search) {
-      normalized += parsed.search;
-    }
-    
-    return normalized.toLowerCase();
-  } catch (e) {
-    logger.error(`Error normalizing URL: ${url}`, e);
-    return url.toLowerCase();
-  }
-}
 
 /**
  * 处理页面上所有的链接
@@ -660,15 +467,16 @@ function normalizeUrl(url) {
 async function processLinks() {
   // 如果不启用高亮，先移除所有高亮
   if (!highlightEnabled) {
+    console.log('Highlighting is disabled, removing all highlights');
     removeAllHighlights();
     return;
   }
   
-  logger.info('Processing links on page...');
+  console.log('Processing links on page...');
   
   // 获取页面上所有链接
   const links = Array.from(document.querySelectorAll('a'));
-  logger.info(`Found ${links.length} links on page`);
+  console.log(`Found ${links.length} links on page`);
   
   // 获取有效的URL
   const urlMap = new Map(); // 用Map来保存URL和对应的元素
@@ -683,29 +491,34 @@ async function processLinks() {
   });
   
   const uniqueUrls = Array.from(urlMap.keys());
-  logger.info(`Found ${uniqueUrls.length} unique URLs on page`);
+  console.log(`Found ${uniqueUrls.length} unique URLs on page`);
   
-  if (uniqueUrls.length === 0) return;
+  if (uniqueUrls.length === 0) {
+    console.log('No valid URLs found on page');
+    return;
+  }
   
   // 批量检查URL，排除已处理的URL
   const newUrls = uniqueUrls.filter(url => !processedUrls.has(url));
-  logger.info(`${newUrls.length} new URLs to check (excluded ${uniqueUrls.length - newUrls.length} already processed)`);
+  console.log(`${newUrls.length} new URLs to check (excluded ${uniqueUrls.length - newUrls.length} already processed)`);
   
   // 记录已处理的URL
   newUrls.forEach(url => processedUrls.add(url));
   
   // 批量检查新URL
+  console.log('Checking URLs in history:', newUrls);
   const historyUrls = await checkUrlsInHistory(newUrls);
+  console.log(`Found ${historyUrls.length} visited URLs`);
   
   // 高亮历史链接
   historyUrls.forEach(url => {
     const elements = urlMap.get(url) || [];
     const record = visitCache.get(url);
-    logger.debug(`Highlighting ${elements.length} elements for URL ${url}`, record);
+    console.log(`Highlighting ${elements.length} elements for URL ${url}`, record);
     elements.forEach(link => highlightLink(link, record));
   });
   
-  logger.info('Finished processing links');
+  console.log('Finished processing links');
   
   // 为所有链接添加鼠标事件监听器，以便记录所有访问状态
   addEventListenersToAllLinks();
@@ -713,12 +526,12 @@ async function processLinks() {
   // 检查是否所有高亮链接都具有正确的事件监听器
   setTimeout(() => {
     const highlightedLinks = document.querySelectorAll('.history-link-highlight');
-    logger.debug(`Verifying ${highlightedLinks.length} highlighted links have event listeners`);
+    console.log(`Verifying ${highlightedLinks.length} highlighted links have event listeners`);
     
     highlightedLinks.forEach(link => {
       // 再次确保事件监听器已绑定
       if (!link.onmouseover || !link.onmouseout) {
-        logger.debug(`Fixing missing event listeners on ${link.href}`);
+        console.log(`Fixing missing event listeners on ${link.href}`);
         link.onmouseover = handleLinkMouseOver;
         link.onmouseout = handleLinkMouseOut;
       }
@@ -792,173 +605,33 @@ function verifyEventListeners() {
  * 初始化: 从存储中获取配置并开始处理
  */
 async function initialize() {
-  logger.info('Initializing history-highlighter...');
-  
-  // 检查high-contrast模式
-  if (window.matchMedia('(prefers-contrast: more)').matches) {
-    logger.info('High contrast mode detected, adjusting styles');
+  try {
+    console.log('Initializing history highlighter...');
+    
+    // 创建 HistoryManager 实例
+    historyManager = new HistoryManager();
+    await historyManager.initialize();
+    
+    console.log('HistoryManager initialized successfully');
+    
+    // 获取配置
+    const config = await ConfigManager.getConfig();
+    console.log('Current config:', config);
+    
+    // 检查是否启用了高亮功能
+    if (!config.highlightVisitedLinks) {
+      console.log('Highlighting is disabled in config');
+      return;
+    }
+    
+    // 开始处理页面
+    processLinks();
+    
+    // 监听DOM变化
+    observeDOMChanges();
+  } catch (error) {
+    console.error('Failed to initialize history highlighter:', error);
   }
-  
-  // 从storage中获取配置
-  chrome.storage.local.get(['backendUrl', 'config'], (result) => {
-    if (result.backendUrl) {
-      BACKEND_URL = result.backendUrl;
-    }
-    
-    if (result.config) {
-      // 如果配置中有highlightVisitedLinks字段，则使用该值
-      if (result.config.highlightVisitedLinks !== undefined) {
-        highlightEnabled = Boolean(result.config.highlightVisitedLinks);
-        logger.info(`Highlight setting read from config: ${highlightEnabled}`);
-      }
-      
-      // 设置日志级别
-      if (result.config.logLevel !== undefined) {
-        currentLogLevel = Number(result.config.logLevel);
-        logger.info(`Log level set to: ${currentLogLevel}`);
-      }
-
-      // 设置URL模式映射
-      if (result.config.urlPatternMap !== undefined) {
-        urlPatternMap = result.config.urlPatternMap;
-        logger.info(`URL pattern mapping set:`, urlPatternMap);
-      }
-    }
-    
-    logger.info(`Using backend URL: ${BACKEND_URL}, highlight enabled: ${highlightEnabled}`);
-    
-    // 打印当前扩展配置
-    logger.info('📋 Extension configuration:', {
-      backendUrl: BACKEND_URL,
-      highlightEnabled: highlightEnabled,
-      tooltipDuration: TOOLTIP_DURATION,
-      currentPage: window.location.href,
-      domain: window.location.hostname,
-      logLevel: currentLogLevel,
-      urlPatternMap: urlPatternMap
-    });
-    
-    // 开始处理链接
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        // 只有当启用高亮时才处理链接
-        if (highlightEnabled) {
-          processLinks();
-        }
-        observeDOMChanges();
-      });
-    } else {
-      // 只有当启用高亮时才处理链接
-      if (highlightEnabled) {
-        processLinks();
-      } else {
-        // 如果高亮被禁用，确保页面上没有高亮元素
-        removeAllHighlights();
-      }
-      observeDOMChanges();
-    }
-  });
-  
-  // 监听存储变化，更新配置
-  chrome.storage.onChanged.addListener((changes) => {
-    let configChanged = false;
-    
-    if (changes.backendUrl) {
-      BACKEND_URL = changes.backendUrl.newValue;
-      logger.info(`Backend URL updated: ${BACKEND_URL}`);
-      // 清除缓存
-      visitCache.clear();
-      processedUrls.clear();
-      configChanged = true;
-    }
-    
-    if (changes.config && changes.config.newValue) {
-      const newConfig = changes.config.newValue;
-      
-      // 处理高亮设置变更
-      if (newConfig.highlightVisitedLinks !== undefined) {
-        const previousValue = highlightEnabled;
-        highlightEnabled = Boolean(newConfig.highlightVisitedLinks);
-        
-        if (previousValue !== highlightEnabled) {
-          logger.info(`Highlight setting updated: ${highlightEnabled}`);
-          configChanged = true;
-          
-          // 如果关闭了高亮，立即清除
-          if (!highlightEnabled) {
-            removeAllHighlights();
-          }
-        }
-      }
-      
-      // 更新日志级别
-      if (newConfig.logLevel !== undefined) {
-        currentLogLevel = Number(newConfig.logLevel);
-        logger.info(`Log level updated to: ${currentLogLevel}`);
-      }
-
-      // 更新URL模式映射
-      if (newConfig.urlPatternMap !== undefined) {
-        const previousMap = urlPatternMap;
-        urlPatternMap = newConfig.urlPatternMap;
-        
-        if (JSON.stringify(previousMap) !== JSON.stringify(urlPatternMap)) {
-          logger.info(`URL pattern mapping updated:`, urlPatternMap);
-          configChanged = true;
-          
-          // 清除缓存并重新处理链接
-          visitCache.clear();
-          processedUrls.clear();
-        }
-      }
-    }
-    
-    // 如果配置改变且高亮启用，则处理链接
-    if (configChanged && highlightEnabled) {
-      processLinks();
-    }
-  });
-  
-  // 监听来自popup的消息
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'HIGHLIGHT_SETTING_CHANGED') {
-      const previousValue = highlightEnabled;
-      highlightEnabled = Boolean(message.enabled);
-      
-      if (previousValue !== highlightEnabled) {
-        logger.info(`Highlight setting changed via message: ${highlightEnabled}`);
-        
-        // 如果关闭了高亮，立即清除
-        if (!highlightEnabled) {
-          removeAllHighlights();
-        } else {
-          // 如果启用了高亮，处理链接
-          processLinks();
-        }
-      }
-    } else if (message.type === 'LOG_LEVEL_CHANGED') {
-      currentLogLevel = Number(message.level);
-      logger.info(`Log level changed to: ${currentLogLevel}`);
-    } else if (message.type === 'URL_PATTERN_CHANGED') {
-      const previousMap = urlPatternMap;
-      urlPatternMap = message.patternMap;
-      
-      if (JSON.stringify(previousMap) !== JSON.stringify(urlPatternMap)) {
-        logger.info(`URL pattern mapping changed via message:`, urlPatternMap);
-        
-        // 清除缓存并重新处理链接
-        visitCache.clear();
-        processedUrls.clear();
-        if (highlightEnabled) {
-          processLinks();
-        }
-      }
-    }
-    return true;
-  });
-  
-  // 在页面卸载时清理tooltip
-  window.addEventListener('beforeunload', clearTooltip);
 }
 
 // 启动

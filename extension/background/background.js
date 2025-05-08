@@ -1,21 +1,19 @@
 import { HistoryDB } from '../utils/db.js';
 import { RETRY_INTERVAL, BATCH_SIZE, DEFAULT_CONFIG } from '../utils/constants.js';
 import { ConfigManager } from '../utils/config.js';
+import { HistoryManager } from '../core/history-manager.js';
 
 const db = new HistoryDB();
+const historyManager = new HistoryManager();
 
 async function initialize() {
   await db.init();
+  await historyManager.initialize();
   // 初始启动时执行一次重试
   await retryFailedRecords();
   // 启动定期重试
   setInterval(retryFailedRecords, RETRY_INTERVAL);
 }
-
-// 启动初始化
-initialize().catch(error => {
-  console.error('Failed to initialize:', error);
-});
 
 // 监听历史记录变化
 chrome.history.onVisited.addListener(async (historyItem) => {
@@ -36,7 +34,7 @@ chrome.history.onVisited.addListener(async (historyItem) => {
   };
 
   try {
-    await reportToBackend(record);
+    await historyManager.reportHistory(record);
   } catch (error) {
     console.error('Failed to report history:', error);
     await showFailureNotification(record.url);
@@ -50,24 +48,6 @@ function isInternalAddress(hostname) {
          hostname.startsWith('192.168.') ||
          hostname.startsWith('localhost') ||
          hostname === '127.0.0.1';
-}
-
-// 上报到后端
-async function reportToBackend(record) {
-  const config = await ConfigManager.getConfig();
-  const backendUrl = config.backendUrl || DEFAULT_CONFIG.backendUrl;
-  
-  const response = await fetch(`${backendUrl}/api/history`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(record)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to report history: ${response.statusText}`);
-  }
 }
 
 // 缓存失败记录
@@ -85,7 +65,7 @@ async function retryFailedRecords() {
 
     for (const record of records) {
       try {
-        await reportToBackend(record);
+        await historyManager.reportHistory(record);
         successfulTimestamps.push(record.timestamp);
       } catch (error) {
         console.error('Retry failed for record:', error);
@@ -137,3 +117,6 @@ async function showFailureNotification(url) {
     console.error('Error showing notification:', error);
   }
 }
+
+// 启动
+initialize();

@@ -23,9 +23,19 @@
   "options_page": "options/options.html",
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content/history-highlighter.js"],
+      "matches": ["<all_urls>"],
+      "js": [
+        "core/config-manager.content.js",
+        "core/history-manager.content.js",
+        "content/history-highlighter.js"
+      ],
       "css": ["content/history-highlighter.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["core/*.js"],
+      "matches": ["http://*/*", "https://*/*"]
     }
   ]
 } 
