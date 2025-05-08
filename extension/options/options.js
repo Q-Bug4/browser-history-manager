@@ -25,6 +25,11 @@ class OptionsManager {
     this.saveBackendUrlButton = document.getElementById('saveBackendUrl');
     this.urlStatus = document.getElementById('urlStatus');
     
+    // URL模式映射元素
+    this.urlPatternMapInput = document.getElementById('urlPatternMap');
+    this.saveUrlPatternButton = document.getElementById('saveUrlPattern');
+    this.urlPatternStatus = document.getElementById('urlPatternStatus');
+    
     // 失败记录元素
     this.pendingCount = document.getElementById('pendingCount');
     this.recordsList = document.getElementById('recordsList');
@@ -62,6 +67,7 @@ class OptionsManager {
     
     this.backendUrlInput.value = this.backendUrl;
     this.logLevelSelect.value = this.logLevel;
+    this.urlPatternMapInput.value = JSON.stringify(config.urlPatternMap || {}, null, 2);
     
     // 如果高亮开关元素存在，设置其状态
     if (this.highlightToggle) {
@@ -103,6 +109,7 @@ class OptionsManager {
     this.retryAllButton.addEventListener('click', () => this.retryAllRecords());
     this.startSyncButton.addEventListener('click', () => this.startManualSync());
     this.saveLogLevelButton.addEventListener('click', () => this.saveLogLevel());
+    this.saveUrlPatternButton.addEventListener('click', () => this.saveUrlPattern());
     
     // 如果高亮设置按钮存在，添加事件监听
     if (this.saveHighlightButton) {
@@ -258,6 +265,67 @@ class OptionsManager {
     }
   }
   
+  async saveUrlPattern() {
+    const patternMapText = this.urlPatternMapInput.value.trim();
+    
+    try {
+      // 验证JSON格式
+      console.log(this.urlPatternMapInput.value)
+      console.log(patternMapText)
+      const patternMap = JSON.parse(patternMapText);
+      
+      // 验证每个键值对
+      for (const [pattern, replacement] of Object.entries(patternMap)) {
+        // 验证正则表达式
+        new RegExp(pattern);
+        // 验证替换字符串中的捕获组引用
+        if (replacement.includes('$')) {
+          const captureGroups = pattern.match(/\([^)]+\)/g) || [];
+          const maxGroup = captureGroups.length;
+          const groupRefs = replacement.match(/\$(\d+)/g) || [];
+          for (const ref of groupRefs) {
+            const groupNum = parseInt(ref.slice(1));
+            if (groupNum > maxGroup) {
+              throw new Error(`Invalid capture group reference $${groupNum} in replacement pattern`);
+            }
+          }
+        }
+      }
+      
+      // 更新配置
+      const config = await ConfigManager.getConfig();
+      config.urlPatternMap = patternMap;
+      await ConfigManager.saveConfig(config);
+      
+      // 更新本地存储
+      chrome.storage.local.get(['config'], (result) => {
+        const localConfig = result.config || {};
+        localConfig.urlPatternMap = patternMap;
+        chrome.storage.local.set({ config: localConfig });
+        
+        // 更新设置显示
+        this.updateSettingsDisplay(config);
+        
+        // 向所有内容脚本发送消息
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach(tab => {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'URL_PATTERN_CHANGED',
+              patternMap: patternMap
+            }).catch(() => {
+              // 忽略发送消息的错误
+            });
+          });
+        });
+        
+        this.showStatus(this.urlPatternStatus, 'URL pattern mapping saved', true);
+      });
+    } catch (error) {
+      console.error('Failed to save URL pattern mapping:', error);
+      this.showStatus(this.urlPatternStatus, `Failed to save URL pattern mapping: ${error.message}`, false);
+    }
+  }
+  
   updateSettingsDisplay(config) {
     const settings = [];
     
@@ -267,6 +335,10 @@ class OptionsManager {
     // 添加高亮设置
     const highlightValue = config.highlightVisitedLinks !== undefined ? config.highlightVisitedLinks : DEFAULT_CONFIG.highlightVisitedLinks;
     settings.push(`<div><strong>Highlight visited links:</strong> ${highlightValue ? 'Enabled' : 'Disabled'}</div>`);
+    
+    // 添加URL模式映射
+    const patternMap = config.urlPatternMap || DEFAULT_CONFIG.urlPatternMap;
+    settings.push(`<div><strong>URL Pattern Mapping:</strong> ${Object.keys(patternMap).length ? 'Configured' : 'Not set'}</div>`);
     
     // 添加日志级别
     const logLevel = config.logLevel !== undefined ? config.logLevel : DEFAULT_CONFIG.logLevel;

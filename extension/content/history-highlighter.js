@@ -24,6 +24,12 @@ const LOG_LEVELS = {
 // 当前日志级别，默认INFO
 let currentLogLevel = LOG_LEVELS.INFO;
 
+// 设置URL关键词模式
+let urlKeywordPattern = '';
+
+// 设置URL模式映射
+let urlPatternMap = {};
+
 /**
  * 日志系统
  */
@@ -197,10 +203,13 @@ async function checkLinkVisitStatus(link) {
   logger.debug(`Checking visit status for: ${link.href}`);
   
   try {
+    // 规范化URL
+    const normalizedUrl = normalizeUrl(link.href);
+    logger.debug(`Normalized URL for query: ${normalizedUrl}`);
+    
     // 构建查询参数
-    const urlToCheck = link.href;
     const queryParams = new URLSearchParams({
-      keyword: urlToCheck,
+      keyword: normalizedUrl,
       pageSize: 1
     });
     
@@ -305,9 +314,13 @@ async function getHistoryRecord(url) {
   try {
     logger.debug(`Fetching history for URL: ${url}`);
     
+    // 规范化URL
+    const normalizedUrl = normalizeUrl(url);
+    logger.debug(`Normalized URL for query: ${normalizedUrl}`);
+    
     // 按照API规范构建查询参数
     const queryParams = new URLSearchParams({
-      keyword: url,
+      keyword: normalizedUrl,
       pageSize: 1
     });
     
@@ -596,12 +609,27 @@ async function checkUrlsInHistory(urls) {
 }
 
 /**
- * 规范化URL以进行比较
+ * 规范化URL，使用模式映射
  * @param {string} url 
  * @returns {string} 规范化后的URL
  */
 function normalizeUrl(url) {
   try {
+    // 尝试使用模式映射
+    for (const [pattern, replacement] of Object.entries(urlPatternMap)) {
+      try {
+        const regex = new RegExp(pattern);
+        if (regex.test(url)) {
+          const normalized = url.replace(regex, replacement);
+          logger.debug(`URL normalized using pattern: ${url} -> ${normalized}`);
+          return normalized.toLowerCase();
+        }
+      } catch (e) {
+        logger.error(`Invalid regex pattern: ${pattern}`, e);
+      }
+    }
+    
+    // 如果没有匹配的模式，使用基本规范化
     const parsed = new URL(url);
     
     // 提取基本URL组件
@@ -619,7 +647,6 @@ function normalizeUrl(url) {
       normalized += parsed.search;
     }
     
-    // 转换为小写 - 域名部分大小写不敏感
     return normalized.toLowerCase();
   } catch (e) {
     logger.error(`Error normalizing URL: ${url}`, e);
@@ -790,6 +817,12 @@ async function initialize() {
         currentLogLevel = Number(result.config.logLevel);
         logger.info(`Log level set to: ${currentLogLevel}`);
       }
+
+      // 设置URL模式映射
+      if (result.config.urlPatternMap !== undefined) {
+        urlPatternMap = result.config.urlPatternMap;
+        logger.info(`URL pattern mapping set:`, urlPatternMap);
+      }
     }
     
     logger.info(`Using backend URL: ${BACKEND_URL}, highlight enabled: ${highlightEnabled}`);
@@ -801,7 +834,8 @@ async function initialize() {
       tooltipDuration: TOOLTIP_DURATION,
       currentPage: window.location.href,
       domain: window.location.hostname,
-      logLevel: currentLogLevel
+      logLevel: currentLogLevel,
+      urlPatternMap: urlPatternMap
     });
     
     // 开始处理链接
@@ -862,6 +896,21 @@ async function initialize() {
         currentLogLevel = Number(newConfig.logLevel);
         logger.info(`Log level updated to: ${currentLogLevel}`);
       }
+
+      // 更新URL模式映射
+      if (newConfig.urlPatternMap !== undefined) {
+        const previousMap = urlPatternMap;
+        urlPatternMap = newConfig.urlPatternMap;
+        
+        if (JSON.stringify(previousMap) !== JSON.stringify(urlPatternMap)) {
+          logger.info(`URL pattern mapping updated:`, urlPatternMap);
+          configChanged = true;
+          
+          // 清除缓存并重新处理链接
+          visitCache.clear();
+          processedUrls.clear();
+        }
+      }
     }
     
     // 如果配置改变且高亮启用，则处理链接
@@ -890,6 +939,20 @@ async function initialize() {
     } else if (message.type === 'LOG_LEVEL_CHANGED') {
       currentLogLevel = Number(message.level);
       logger.info(`Log level changed to: ${currentLogLevel}`);
+    } else if (message.type === 'URL_PATTERN_CHANGED') {
+      const previousMap = urlPatternMap;
+      urlPatternMap = message.patternMap;
+      
+      if (JSON.stringify(previousMap) !== JSON.stringify(urlPatternMap)) {
+        logger.info(`URL pattern mapping changed via message:`, urlPatternMap);
+        
+        // 清除缓存并重新处理链接
+        visitCache.clear();
+        processedUrls.clear();
+        if (highlightEnabled) {
+          processLinks();
+        }
+      }
     }
     return true;
   });

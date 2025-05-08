@@ -35,6 +35,14 @@
           <button id="saveHighlight">Save</button>
           <span id="highlightStatus" class="status-text"></span>
         </div>
+
+        <div class="setting-item">
+          <label for="urlPatternMap">URL Pattern Mapping:</label>
+          <textarea id="urlPatternMap" class="full-width" rows="4" placeholder='{"https://xxxx\.ai/v1/([\da-zA-Z]+)#94fb3c07-dded-47a9-b50c-79895db83c34_desktop-watch-next-side": "https://xxxx.ai/v1/$1"}'></textarea>
+          <p class="setting-desc">Enter URL pattern mappings as JSON. The key is a regular expression pattern, and the value is the replacement pattern. Use $1, $2, etc. to reference capture groups.</p>
+          <button id="saveUrlPattern">Save</button>
+          <span id="urlPatternStatus" class="status-text"></span>
+        </div>
       </section>
     </div>
     

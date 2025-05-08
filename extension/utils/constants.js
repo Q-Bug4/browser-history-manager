@@ -5,7 +5,8 @@ export const DEFAULT_CONFIG = {
   showFailureNotifications: false,
   highlightVisitedLinks: true,
   backendUrl: 'http://localhost:8080',
-  logLevel: 1 // 默认INFO级别
+  logLevel: 1, // 默认INFO级别
+  urlPatternMap: {} // 使用对象存储URL模式映射
 };
 
 export const LOG_LEVELS = {
