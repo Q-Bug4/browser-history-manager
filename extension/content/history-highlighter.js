@@ -125,10 +125,6 @@ function highlightLink(link, historyRecord = null) {
   link.addEventListener('mouseover', handleLinkMouseOver);
   link.addEventListener('mouseout', handleLinkMouseOut);
   
-  // 直接绑定事件处理函数作为备份方案
-  link.onmouseover = handleLinkMouseOver;
-  link.onmouseout = handleLinkMouseOut;
-  
   console.log(`Event listeners added to link: ${link.href}`);
 }
 
@@ -149,14 +145,6 @@ function addEventListenersToAllLinks() {
     // 添加监听器
     link.addEventListener('mouseover', logLinkHover);
     link.addEventListener('mouseout', clearPendingOperations);
-    
-    // 直接绑定事件处理函数作为备份方案
-    if (!link.onmouseover) {
-      link.onmouseover = logLinkHover;
-    }
-    if (!link.onmouseout) {
-      link.onmouseout = clearPendingOperations;
-    }
   });
 }
 
@@ -299,58 +287,54 @@ async function getHistoryRecord(url) {
  * @param {Object} historyRecord 历史记录信息
  */
 function showTooltip(event, historyRecord = null) {
-  if (!event || !event.currentTarget) {
-    logger.error('Invalid event for tooltip');
-    return;
-  }
-  
   const link = event.currentTarget;
-  logger.debug('Showing tooltip for link:', link.href);
-  
-  // 清除上一个tooltip和定时器
+  if (!link) return;
+
+  // 清除现有的tooltip
   clearTooltip();
-  
-  // 创建tooltip元素
+
+  // 创建新的tooltip元素
   const tooltip = document.createElement('div');
   tooltip.className = 'history-tooltip';
   
-  // 如果有历史记录信息，显示详细信息
-  if (historyRecord && historyRecord.lastVisitTime) {
-    const visitDate = new Date(historyRecord.lastVisitTime);
-    const visitCount = historyRecord.visitCount || 1;
-    
-    tooltip.innerHTML = `
-      <div>上次访问时间: ${visitDate.toLocaleString()}</div>
-      <div>访问次数: ${visitCount}</div>
-    `;
+  // 创建tooltip内容
+  const content = document.createElement('div');
+  content.className = 'tooltip-content';
+  
+  // 添加访问时间
+  const timeElement = document.createElement('div');
+  timeElement.className = 'tooltip-time';
+  if (historyRecord && historyRecord.timestamp) {
+    const visitTime = new Date(historyRecord.timestamp);
+    timeElement.textContent = `Visited: ${visitTime.toLocaleString()}`;
   } else {
-    tooltip.textContent = '您已经访问过此链接';
+    timeElement.textContent = 'Visited';
   }
+  content.appendChild(timeElement);
   
+  // 添加链接信息
+  const urlElement = document.createElement('div');
+  urlElement.className = 'tooltip-url';
+  urlElement.textContent = link.href;
+  content.appendChild(urlElement);
+  
+  tooltip.appendChild(content);
+  
+  // 设置tooltip位置
+  const rect = link.getBoundingClientRect();
+  tooltip.style.position = 'fixed';
+  tooltip.style.left = `${rect.left + window.scrollX}px`;
+  tooltip.style.top = `${rect.bottom + window.scrollY + 5}px`;
+  
+  // 添加到文档中
   document.body.appendChild(tooltip);
-  
-  // 获取链接位置
-  const linkRect = link.getBoundingClientRect();
-  const scrollY = window.scrollY || window.pageYOffset;
-  
-  // 设置tooltip位置 - 在链接正下方居中
-  tooltip.style.left = (linkRect.left + linkRect.width / 2) + 'px';
-  tooltip.style.top = (linkRect.bottom + scrollY + 10) + 'px';
-  
-  // 显示tooltip
-  setTimeout(() => {
-    tooltip.classList.add('show');
-  }, 10);
-  
-  // 保存当前tooltip引用
   currentTooltip = tooltip;
   
   // 设置自动隐藏
-  tooltipTimer = setTimeout(() => {
-    hideTooltip();
-  }, TOOLTIP_DURATION);
-  
-  logger.debug('Tooltip created and displayed');
+  if (tooltipTimer) {
+    clearTimeout(tooltipTimer);
+  }
+  tooltipTimer = setTimeout(hideTooltip, TOOLTIP_DURATION);
 }
 
 /**
