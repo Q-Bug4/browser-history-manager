@@ -1,4 +1,41 @@
 target/
 node_modules/
 
+# Rust
 Cargo.lock
+/target
+**/*.rs.bk
+*.pdb
+
+# Browser Extension
+/dist
+/extension/dist
+*.zip
+*.xpi
+*.crx
+*.pem
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnpm-debug.log
+.npm
+
+# Vue
+.DS_Store
+/dist
+/dist-ssr
+/coverage
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
