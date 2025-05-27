@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Browser History Manager",
-  "version": "1.0.0",
-  "description": "A browser history management system",
+  "version": "2.0.0",
+  "description": "A modern browser history management system with link highlighting and backend synchronization",
   "permissions": [
     "history",
     "storage",
@@ -18,27 +18,29 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "popup/popup.html"
+    "default_popup": "popup/popup.html",
+    "default_title": "History Manager"
   },
   "options_page": "options/options.html",
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": [
-        "core/config-manager.content.js",
-        "core/history-manager.content.js",
-        "content/history-highlighter.js"
+        "content/link-highlighter.js"
       ],
-      "css": ["content/history-highlighter.css"]
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["core/*.js"],
-      "matches": ["http://*/*", "https://*/*"]
+      "resources": [
+        "utils/*.js"
+      ],
+      "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-  }
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "minimum_chrome_version": "88"
 } 

@@ -22,7 +22,7 @@
         <div class="setting-item">
           <label for="backendUrl">Backend URL:</label>
           <input type="text" id="backendUrl" class="full-width">
-          <button id="saveBackendUrl">Save</button>
+          <button id="saveBackendUrl" class="action-button">Save</button>
           <span id="urlStatus" class="status-text"></span>
         </div>
         
@@ -32,7 +32,7 @@
             Highlight visited links
           </label>
           <p class="setting-desc">When enabled, links that you've visited before will be highlighted with a blue border.</p>
-          <button id="saveHighlight">Save</button>
+          <button id="saveHighlight" class="action-button">Save</button>
           <span id="highlightStatus" class="status-text"></span>
         </div>
 
@@ -40,7 +40,7 @@
           <label for="urlPatternMap">URL Pattern Mapping:</label>
           <textarea id="urlPatternMap" class="full-width" rows="4" placeholder='{"https://xxxx\.ai/v1/([\da-zA-Z]+)#94fb3c07-dded-47a9-b50c-79895db83c34_desktop-watch-next-side": "https://xxxx.ai/v1/$1"}'></textarea>
           <p class="setting-desc">Enter URL pattern mappings as JSON. The key is a regular expression pattern, and the value is the replacement pattern. Use $1, $2, etc. to reference capture groups.</p>
-          <button id="saveUrlPattern">Save</button>
+          <button id="saveUrlPattern" class="action-button">Save</button>
           <span id="urlPatternStatus" class="status-text"></span>
         </div>
       </section>
@@ -52,7 +52,7 @@
         <h2>Pending Records</h2>
         <div class="records-info">
           <span id="pendingCount">Loading...</span>
-          <button id="retryAll">Sync All Pending Records</button>
+          <button id="retryAll" class="action-button">Sync All Pending Records</button>
         </div>
         <div id="recordsList" class="records-list">
           <!-- Records will be inserted here -->
@@ -72,7 +72,7 @@
               <input type="datetime-local" id="syncEndTime">
             </label>
           </div>
-          <button id="startSync">Start Sync</button>
+          <button id="startSync" class="action-button">Start Sync</button>
         </div>
         <div id="syncProgress" class="sync-progress">
           <div class="progress-bar">
@@ -97,7 +97,7 @@
             <option value="3">ERROR - Only errors</option>
             <option value="4">NONE - No logging</option>
           </select>
-          <button id="saveLogLevel">Save</button>
+          <button id="saveLogLevel" class="action-button">Save</button>
           <span id="logLevelStatus" class="status-text"></span>
           <p class="setting-desc">Set logging verbosity level for extension components.</p>
         </div>

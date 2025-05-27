@@ -1,251 +1,544 @@
-import { ConfigManager } from '../utils/config.js';
-import { DEFAULT_CONFIG } from '../utils/constants.js';
-
-// 导入配置管理器
-const configManager = new ConfigManager();
-
 /**
- * 历史记录管理类
- * 统一管理历史记录的上报和查询逻辑
+ * 历史记录管理器
+ * 统一管理历史记录的上报、查询和缓存
  */
-export class HistoryManager {
+
+import { configManager } from '../utils/config-manager.js';
+import { dbManager } from '../utils/db.js';
+import { HttpClient } from '../utils/http-client.js';
+import { logger } from '../utils/logger.js';
+import { 
+  API_ENDPOINTS, 
+  EVENTS, 
+  ERROR_CODES, 
+  TIME_CONSTANTS,
+  URL_PATTERNS 
+} from '../utils/constants.js';
+import { EventEmitter } from '../utils/event-emitter.js';
+
+class HistoryManager extends EventEmitter {
   constructor() {
+    super();
+    this.logger = logger.createChild('HistoryManager');
+    this.httpClient = null;
     this.initialized = false;
-    this.backendUrl = null;
+    this.retryTimer = null;
   }
 
   /**
-   * 初始化
+   * 初始化历史记录管理器
+   * @returns {Promise<void>}
    */
   async initialize() {
-    console.log('[HistoryManager] Initializing...');
-    const config = await ConfigManager.getConfig();
-    if (config.backendUrl) {
-      this.backendUrl = config.backendUrl;
-      console.log('[HistoryManager] Backend URL updated:', this.backendUrl);
+    try {
+      this.logger.info('Initializing HistoryManager...');
+
+      // 确保配置管理器已初始化
+      if (!configManager.isInitialized()) {
+        await configManager.initialize();
+      }
+
+      // 初始化数据库
+      await dbManager.initialize();
+
+      // 创建HTTP客户端
+      this.createHttpClient();
+
+      // 监听配置变化
+      configManager.on(EVENTS.CONFIG_UPDATED, this.handleConfigUpdate.bind(this));
+
+      // 启动重试机制
+      this.startRetryMechanism();
+
+      this.initialized = true;
+      this.logger.info('HistoryManager initialized successfully');
+    } catch (error) {
+      this.logger.error('Failed to initialize HistoryManager:', error);
+      throw error;
     }
-    console.log('[HistoryManager] Initialization completed');
   }
 
   /**
-   * 上报历史记录到后端
-   * @param {Object} record 历史记录对象
-   * @param {string} record.url 访问的URL
-   * @param {string} record.timestamp 访问时间戳
-   * @param {string} record.domain 域名
+   * 创建HTTP客户端
+   */
+  createHttpClient() {
+    const config = configManager.getAll();
+    this.httpClient = new HttpClient({
+      baseURL: config.backendUrl,
+      timeout: config.requestTimeout,
+      maxRetries: config.maxRetries,
+      retryDelay: config.retryInterval
+    });
+  }
+
+  /**
+   * 处理配置更新
+   * @param {Object} event 配置更新事件
+   */
+  handleConfigUpdate(event) {
+    this.logger.info('Config updated, recreating HTTP client');
+    this.createHttpClient();
+    
+    // 更新日志级别
+    if (event.newConfig.logLevel !== event.oldConfig.logLevel) {
+      logger.setLevel(event.newConfig.logLevel);
+    }
+  }
+
+  /**
+   * 启动重试机制
+   */
+  startRetryMechanism() {
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+    }
+
+    const retryInterval = configManager.get('retryInterval', TIME_CONSTANTS.RETRY_INTERVAL);
+    this.retryTimer = setInterval(() => {
+      this.retryFailedRequests();
+    }, retryInterval);
+
+    this.logger.debug('Retry mechanism started');
+  }
+
+  /**
+   * 停止重试机制
+   */
+  stopRetryMechanism() {
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+      this.retryTimer = null;
+      this.logger.debug('Retry mechanism stopped');
+    }
+  }
+
+  /**
+   * 上报历史记录
+   * @param {Object} record 历史记录
    * @returns {Promise<void>}
    */
   async reportHistory(record) {
-    console.log('[HistoryManager] Reporting history record:', record);
-    const response = await fetch(`${this.backendUrl}/api/history`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(record)
-    });
+    try {
+      this.logger.debug('Reporting history record:', record);
 
-    if (!response.ok) {
-      console.error('[HistoryManager] Failed to report history:', response.statusText);
-      throw new Error(`Failed to report history: ${response.statusText}`);
+      if (!this.validateHistoryRecord(record)) {
+        throw new Error('Invalid history record format');
+      }
+
+      // 尝试上报
+      await this.httpClient.post(API_ENDPOINTS.HISTORY, record);
+      
+      // 缓存成功上报的记录
+      await dbManager.cacheHistoryRecord(record);
+      
+      this.logger.debug('History record reported successfully:', record.url);
+      this.emit(EVENTS.HISTORY_UPDATED, { type: 'reported', record });
+
+    } catch (error) {
+      this.logger.error('Failed to report history record:', error);
+      
+      // 将失败的请求添加到重试队列
+      await dbManager.addFailedRequest({
+        url: record.url,
+        method: 'POST',
+        data: record,
+        error: error.message
+      });
+
+      // 如果启用了通知，发送失败通知
+      if (configManager.get('showNotifications', true)) {
+        this.sendFailureNotification(error.message);
+      }
+
+      throw error;
     }
-    console.log('[HistoryManager] History record reported successfully');
+  }
+
+  /**
+   * 批量上报历史记录
+   * @param {Array} records 历史记录数组
+   * @returns {Promise<Object>} 上报结果统计
+   */
+  async batchReportHistory(records) {
+    const results = {
+      success: 0,
+      failed: 0,
+      errors: []
+    };
+
+    const batchSize = configManager.get('batchSize', 100);
+    
+    for (let i = 0; i < records.length; i += batchSize) {
+      const batch = records.slice(i, i + batchSize);
+      
+      for (const record of batch) {
+        try {
+          await this.reportHistory(record);
+          results.success++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({ record, error: error.message });
+        }
+      }
+    }
+
+    this.logger.info(`Batch report completed: ${results.success} success, ${results.failed} failed`);
+    return results;
   }
 
   /**
    * 查询单个URL的历史记录
    * @param {string} url 要查询的URL
-   * @param {boolean} normalize 是否规范化URL
-   * @returns {Promise<Object|null>} 历史记录对象或null
+   * @param {boolean} useCache 是否使用缓存
+   * @returns {Promise<Object|null>} 历史记录或null
    */
-  async getHistoryRecord(url, normalize = true) {
+  async getHistoryRecord(url, useCache = true) {
     try {
-      console.log('[HistoryManager] Getting history record for URL:', url);
-      
-      // 如果启用规范化，使用规范化后的URL进行查询
-      const queryUrl = normalize ? this.normalizeUrl(url) : url;
-      if (normalize) {
-        console.log('[HistoryManager] Normalized URL:', queryUrl);
+      if (!url || !this.isValidUrl(url)) {
+        this.logger.warn('Invalid URL provided:', url);
+        return null;
       }
-      
-      const queryParams = new URLSearchParams({
-        keyword: queryUrl,
+
+      this.logger.debug('Getting history record for URL:', url);
+
+      // 首先检查缓存
+      if (useCache) {
+        const cachedRecord = await dbManager.getCachedHistoryRecord(url);
+        if (cachedRecord) {
+          this.logger.debug('Found cached history record:', url);
+          return cachedRecord;
+        }
+      }
+
+      // 从后端查询
+      const normalizedUrl = this.normalizeUrl(url);
+      const response = await this.httpClient.get(API_ENDPOINTS.HISTORY, {
+        keyword: normalizedUrl,
         pageSize: 1
       });
-      
-      const apiUrl = `${this.backendUrl}/api/history?${queryParams}`;
-      console.log('[HistoryManager] Requesting:', apiUrl, 'with params:', Object.fromEntries(queryParams.entries()));
-      
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        const errorText = await response.text().catch(e => 'Unable to get response text');
-        console.error('[HistoryManager] Failed to fetch history:', response.status, response.statusText, 'Error:', errorText);
-        throw new Error(`Failed to fetch history: ${response.status} - ${response.statusText}. Error: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.items && data.items.length > 0) {
+
+      if (response.items && response.items.length > 0) {
         const record = {
-          url: data.items[0].url,
-          lastVisitTime: data.items[0].timestamp,
-          visitCount: 1
+          url: response.items[0].url,
+          timestamp: response.items[0].timestamp,
+          visitCount: 1,
+          title: response.items[0].title || ''
         };
-        console.log('[HistoryManager] Found history record:', record);
+
+        // 缓存查询结果
+        await dbManager.cacheHistoryRecord(record);
+        
+        this.logger.debug('Found history record:', record);
         return record;
       }
-      
-      console.log('[HistoryManager] No history record found for URL:', url);
+
+      this.logger.debug('No history record found for URL:', url);
       return null;
+
     } catch (error) {
-      console.error('[HistoryManager] Error fetching history record:', error);
+      this.logger.error('Error getting history record:', error);
       return null;
     }
   }
 
   /**
    * 批量查询URL的历史记录
-   * @param {string[]} urls 要查询的URL数组
+   * @param {Array} urls URL数组
    * @param {string} domain 域名过滤
-   * @param {boolean} normalize 是否规范化URL
-   * @returns {Promise<Map<string, Object>>} URL到历史记录的映射
+   * @param {boolean} useCache 是否使用缓存
+   * @returns {Promise<Map>} URL到历史记录的映射
    */
-  async batchGetHistoryRecords(urls, domain = null, normalize = true) {
+  async batchGetHistoryRecords(urls, domain = null, useCache = true) {
     try {
-      const queryParams = new URLSearchParams({
-        pageSize: 2000
-      });
-
-      if (domain) {
-        queryParams.append('domain', domain);
-      }
-      
-      const apiUrl = `${this.backendUrl}/api/history?${queryParams}`;
-      console.log('[HistoryManager] Requesting:', apiUrl, 'with params:', Object.fromEntries(queryParams.entries()));
-      
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        const errorText = await response.text().catch(e => 'Unable to get response text');
-        console.error('[HistoryManager] Failed to fetch history:', response.status, response.statusText, 'Error:', errorText);
-        throw new Error(`Failed to fetch history: ${response.status} - ${response.statusText}. Error: ${errorText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.items || !Array.isArray(data.items)) {
-        console.log('[HistoryManager] No history records found');
+      if (!urls || urls.length === 0) {
         return new Map();
       }
 
-      // 创建历史记录映射
-      const historyMap = new Map();
-      const historyUrlSet = new Set();
+      this.logger.debug(`Batch getting history records for ${urls.length} URLs`);
 
-      // 预处理历史记录
-      data.items.forEach(item => {
-        if (!item || !item.url) return;
+      const results = new Map();
+      const uncachedUrls = [];
+
+      // 首先检查缓存
+      if (useCache) {
+        const cachedResults = await dbManager.batchGetCachedHistoryRecords(urls);
+        for (const [url, record] of cachedResults) {
+          results.set(url, record);
+        }
         
-        // 存储原始URL
-        historyUrlSet.add(item.url);
-        historyMap.set(item.url, {
-          url: item.url,
-          lastVisitTime: item.timestamp,
-          visitCount: 1
-        });
-        
-        // 如果启用规范化，存储规范化后的URL
-        if (normalize) {
-          const normalizedUrl = this.normalizeUrl(item.url);
-          if (normalizedUrl !== item.url) {
-            historyUrlSet.add(normalizedUrl);
-            historyMap.set(normalizedUrl, {
-              url: item.url,
-              lastVisitTime: item.timestamp,
-              visitCount: 1
-            });
+        // 找出未缓存的URL
+        for (const url of urls) {
+          if (!results.has(url)) {
+            uncachedUrls.push(url);
           }
         }
-      });
+      } else {
+        uncachedUrls.push(...urls);
+      }
 
-      // 匹配URL
-      const resultMap = new Map();
-      for (const url of urls) {
-        if (!url) continue;
-        
-        // 检查原始URL
-        if (historyUrlSet.has(url)) {
-          resultMap.set(url, historyMap.get(url));
-          continue;
+      // 从后端批量查询未缓存的URL
+      if (uncachedUrls.length > 0) {
+        const queryParams = {
+          pageSize: 2000
+        };
+
+        if (domain) {
+          queryParams.domain = domain;
         }
-        
-        // 如果启用规范化，检查规范化后的URL
-        if (normalize) {
-          const normalizedUrl = this.normalizeUrl(url);
-          if (historyUrlSet.has(normalizedUrl)) {
-            resultMap.set(url, historyMap.get(normalizedUrl));
+
+        const response = await this.httpClient.get(API_ENDPOINTS.HISTORY, queryParams);
+
+        if (response.items && Array.isArray(response.items)) {
+          const historyMap = new Map();
+          const recordsToCache = [];
+
+          // 预处理历史记录
+          for (const item of response.items) {
+            if (!item || !item.url) continue;
+
+            const record = {
+              url: item.url,
+              timestamp: item.timestamp,
+              visitCount: 1,
+              title: item.title || ''
+            };
+
+            historyMap.set(item.url, record);
+            historyMap.set(this.normalizeUrl(item.url), record);
+            recordsToCache.push(record);
+          }
+
+          // 匹配URL
+          for (const url of uncachedUrls) {
+            if (historyMap.has(url)) {
+              results.set(url, historyMap.get(url));
+            } else {
+              const normalizedUrl = this.normalizeUrl(url);
+              if (historyMap.has(normalizedUrl)) {
+                results.set(url, historyMap.get(normalizedUrl));
+              }
+            }
+          }
+
+          // 批量缓存新记录
+          if (recordsToCache.length > 0) {
+            await dbManager.batchCacheHistoryRecords(recordsToCache);
           }
         }
       }
 
-      return resultMap;
+      this.logger.debug(`Batch query completed: found ${results.size} records out of ${urls.length} URLs`);
+      return results;
+
     } catch (error) {
-      console.error('[HistoryManager] Error batch fetching history records:', error);
+      this.logger.error('Error batch getting history records:', error);
       return new Map();
     }
   }
 
   /**
+   * 重试失败的请求
+   */
+  async retryFailedRequests() {
+    try {
+      const maxRetries = configManager.get('maxRetries', 3);
+      const failedRequests = await dbManager.getFailedRequests(maxRetries);
+
+      if (failedRequests.length === 0) {
+        return;
+      }
+
+      this.logger.info(`Retrying ${failedRequests.length} failed requests`);
+
+      for (const request of failedRequests) {
+        try {
+          // 尝试重新发送请求
+          await this.httpClient.post(API_ENDPOINTS.HISTORY, request.data);
+          
+          // 成功后从重试队列中移除
+          await dbManager.removeFailedRequest(request.id);
+          
+          // 缓存成功的记录
+          await dbManager.cacheHistoryRecord(request.data);
+          
+          this.logger.debug('Retry successful for request:', request.id);
+
+        } catch (error) {
+          // 更新重试次数
+          await dbManager.updateFailedRequest(request.id, error.message);
+          
+          // 如果达到最大重试次数，移除请求
+          if (request.retryCount >= maxRetries - 1) {
+            await dbManager.removeFailedRequest(request.id);
+            this.logger.warn('Max retries reached for request:', request.id);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error during retry mechanism:', error);
+    }
+  }
+
+  /**
    * 规范化URL
-   * @param {string} url 
+   * @param {string} url 原始URL
    * @returns {string} 规范化后的URL
    */
   normalizeUrl(url) {
     try {
-      // 获取URL模式映射
-      const urlPatternMap = ConfigManager.getConfig().urlPatternMap || {};
-      
-      // 尝试使用模式映射
-      for (const [pattern, replacement] of Object.entries(urlPatternMap)) {
-        try {
-          const regex = new RegExp(pattern);
-          if (regex.test(url)) {
-            const normalized = url.replace(regex, replacement).toLowerCase();
-            return normalized;
-          }
-        } catch (e) {
-          console.error('[HistoryManager] Invalid regex pattern:', pattern, e);
-        }
-      }
-      
-      // 如果没有匹配的模式，使用基本规范化
       const parsed = new URL(url);
       
-      // 提取基本URL组件
-      let normalized = parsed.origin;
+      // 移除片段标识符
+      parsed.hash = '';
       
-      // 处理路径 - 移除末尾斜杠
-      let path = parsed.pathname;
-      if (path.endsWith('/') && path !== '/') {
-        path = path.slice(0, -1);
-      }
-      normalized += path;
-      
-      // 保留查询参数
-      if (parsed.search) {
-        normalized += parsed.search;
+      // 移除末尾斜杠（除了根路径）
+      if (parsed.pathname.endsWith('/') && parsed.pathname !== '/') {
+        parsed.pathname = parsed.pathname.slice(0, -1);
       }
       
-      normalized = normalized.toLowerCase();
-      console.log('[HistoryManager] URL normalized using basic rules:', url, '->', normalized);
-      return normalized;
-    } catch (e) {
-      console.error('[HistoryManager] Error normalizing URL:', url, e);
+      // 转换为小写
+      return parsed.toString().toLowerCase();
+    } catch (error) {
+      this.logger.warn('Failed to normalize URL:', url, error);
       return url.toLowerCase();
     }
   }
+
+  /**
+   * 验证URL是否有效
+   * @param {string} url URL字符串
+   * @returns {boolean} 是否有效
+   */
+  isValidUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+
+    // 检查是否是无效的URL模式
+    for (const pattern of Object.values(URL_PATTERNS)) {
+      if (pattern.test(url)) {
+        return false;
+      }
+    }
+
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 验证历史记录格式
+   * @param {Object} record 历史记录
+   * @returns {boolean} 是否有效
+   */
+  validateHistoryRecord(record) {
+    if (!record || typeof record !== 'object') {
+      return false;
+    }
+
+    // 必需字段
+    if (!record.url || !this.isValidUrl(record.url)) {
+      return false;
+    }
+
+    // 可选字段验证
+    if (record.timestamp && (typeof record.timestamp !== 'number' && typeof record.timestamp !== 'string')) {
+      return false;
+    }
+
+    if (record.visitCount && typeof record.visitCount !== 'number') {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * 发送失败通知
+   * @param {string} message 错误消息
+   */
+  sendFailureNotification(message) {
+    try {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        title: 'History Manager',
+        message: `Failed to sync history: ${message}`
+      });
+    } catch (error) {
+      this.logger.error('Failed to send notification:', error);
+    }
+  }
+
+  /**
+   * 健康检查
+   * @returns {Promise<boolean>} 后端服务是否健康
+   */
+  async healthCheck() {
+    try {
+      return await this.httpClient.healthCheck();
+    } catch (error) {
+      this.logger.error('Health check failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 清理缓存
+   * @returns {Promise<void>}
+   */
+  async clearCache() {
+    try {
+      const cacheExpiration = configManager.get('cacheExpiration', TIME_CONSTANTS.CACHE_EXPIRATION);
+      const deletedCount = await dbManager.cleanExpiredCache(cacheExpiration);
+      
+      this.logger.info(`Cache cleanup completed: ${deletedCount} records deleted`);
+      this.emit(EVENTS.CACHE_CLEARED, { deletedCount });
+    } catch (error) {
+      this.logger.error('Failed to clear cache:', error);
+    }
+  }
+
+  /**
+   * 获取统计信息
+   * @returns {Promise<Object>} 统计信息
+   */
+  async getStats() {
+    try {
+      const dbStats = await dbManager.getStats();
+      const isHealthy = await this.healthCheck();
+      
+      return {
+        database: dbStats,
+        backend: {
+          healthy: isHealthy,
+          url: configManager.get('backendUrl')
+        },
+        config: configManager.getAll()
+      };
+    } catch (error) {
+      this.logger.error('Failed to get stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 销毁管理器
+   */
+  destroy() {
+    this.stopRetryMechanism();
+    this.removeAllListeners();
+    dbManager.close();
+    this.initialized = false;
+    this.logger.info('HistoryManager destroyed');
+  }
 }
 
-// 将类添加到全局作用域（用于content scripts）
-if (typeof window !== 'undefined') {
-  window.HistoryManager = HistoryManager;
-} 
+// 创建单例实例
+export const historyManager = new HistoryManager();
+
+// 导出类供测试使用
+export { HistoryManager }; 
