@@ -11,7 +11,7 @@ const CSS_CLASSES = {
 };
 
 const TIME_CONSTANTS = {
-  HOVER_DELAY: 500,
+  HOVER_DELAY: 150,  // 减少到150ms，让响应更快
   TOOLTIP_DURATION: 3000,
   DEBOUNCE_DELAY: 100
 };
@@ -132,24 +132,26 @@ class LinkHighlighter {
       }
 
       .${CSS_CLASSES.TOOLTIP} {
-        position: fixed;
-        z-index: 10000;
-        background: #333;
-        color: white;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        max-width: 300px;
-        word-wrap: break-word;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-        pointer-events: none;
+        position: fixed !important;
+        z-index: 10000 !important;
+        background: #333 !important;
+        color: white !important;
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
+        font-size: 12px !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        max-width: 300px !important;
+        word-wrap: break-word !important;
+        opacity: 0 !important;
+        transition: opacity 0.2s ease !important;
+        pointer-events: none !important;
+        display: block !important;
+        visibility: visible !important;
       }
 
       .${CSS_CLASSES.TOOLTIP}.show {
-        opacity: 1;
+        opacity: 1 !important;
       }
 
       .${CSS_CLASSES.TOOLTIP_CONTENT} {
@@ -337,17 +339,62 @@ class LinkHighlighter {
   handleMouseOver(event) {
     const link = event.currentTarget;
     
-    if (!this.config.enableTooltips) {
-      return;
-    }
+    console.log('[LinkHighlighter] Mouse over link:', link.href);
 
     // 清除之前的定时器
     this.clearHoverTimer();
 
     // 设置延迟显示tooltip
-    this.hoverTimer = setTimeout(() => {
-      this.showTooltip(link, event);
+    this.hoverTimer = setTimeout(async () => {
+      await this.handleLinkHover(link, event);
     }, TIME_CONSTANTS.HOVER_DELAY);
+  }
+
+  /**
+   * 处理链接悬停逻辑
+   */
+  async handleLinkHover(link, event) {
+    if (!link || !link.href) {
+      return;
+    }
+
+    console.log('[LinkHighlighter] Handling hover for:', link.href);
+
+    // 保存链接位置信息，避免异步操作后event失效
+    const linkRect = link.getBoundingClientRect();
+    const linkPosition = {
+      left: linkRect.left + window.scrollX,
+      top: linkRect.top + window.scrollY,
+      bottom: linkRect.bottom + window.scrollY,
+      width: linkRect.width,
+      height: linkRect.height
+    };
+
+    // 首先检查链接是否已被访问
+    let historyRecord = this.visitCache.get(link.href);
+    
+    if (!historyRecord) {
+      // 如果缓存中没有，查询历史记录
+      console.log('[LinkHighlighter] No cached record, querying history...');
+      historyRecord = await this.getSingleHistoryRecord(link.href);
+    }
+
+    if (historyRecord) {
+      console.log('[LinkHighlighter] Link has been visited:', historyRecord);
+      
+      // 如果链接已被访问但还没高亮，现在高亮它
+      if (!link.classList.contains(CSS_CLASSES.HIGHLIGHTED_LINK)) {
+        this.highlightLink(link);
+        console.log('[LinkHighlighter] Link highlighted on hover');
+      }
+
+      // 显示tooltip（如果启用）
+      if (this.config.enableTooltips) {
+        this.createTooltip(link, historyRecord, linkPosition);
+      }
+    } else {
+      console.log('[LinkHighlighter] Link has not been visited');
+    }
   }
 
   /**
@@ -358,51 +405,60 @@ class LinkHighlighter {
     this.hideTooltip();
   }
 
-  /**
-   * 显示tooltip
-   */
-  async showTooltip(link, event) {
-    if (!link || !link.href) {
-      return;
-    }
 
-    // 获取历史记录信息
-    let historyRecord = this.visitCache.get(link.href);
-    
-    if (!historyRecord) {
-      // 如果缓存中没有，尝试单独查询
-      historyRecord = await this.getSingleHistoryRecord(link.href);
-    }
-
-    // 创建tooltip
-    this.createTooltip(link, historyRecord, event);
-  }
 
   /**
    * 获取单个历史记录
    */
   async getSingleHistoryRecord(url) {
     try {
+      console.log('[LinkHighlighter] Requesting single history record for:', url);
+      
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
-        data: { url: url }
+        data: { 
+          urls: [url],  // 使用数组格式，和批量查询保持一致
+          domain: window.location.hostname 
+        }
       });
 
-      if (response.success && response.data) {
-        this.visitCache.set(url, response.data);
-        return response.data;
+      console.log('[LinkHighlighter] Single history response:', response);
+
+      if (response && response.success) {
+        const historyData = response.data;
+        
+        // 检查返回的数据格式
+        if (historyData && typeof historyData === 'object') {
+          // 如果是对象格式，查找对应的URL
+          const record = historyData[url];
+          if (record) {
+            this.visitCache.set(url, record);
+            console.log('[LinkHighlighter] Found and cached single history record:', record);
+            return record;
+          }
+        }
       }
+
+      console.log('[LinkHighlighter] No history record found for:', url);
+      return null;
     } catch (error) {
       console.error('[LinkHighlighter] Error getting single history record:', error);
+      return null;
     }
-
-    return null;
   }
 
   /**
    * 创建tooltip
    */
-  createTooltip(link, historyRecord, event) {
+  createTooltip(link, historyRecord, linkPosition) {
+    console.log('[LinkHighlighter] Creating tooltip for:', link.href, historyRecord);
+
+    // 只为已访问的链接显示tooltip
+    if (!historyRecord) {
+      console.log('[LinkHighlighter] No history record, skipping tooltip');
+      return;
+    }
+
     // 移除现有tooltip
     this.hideTooltip();
 
@@ -416,7 +472,7 @@ class LinkHighlighter {
     const timeElement = document.createElement('div');
     timeElement.className = 'tooltip-time';
     
-    if (historyRecord && historyRecord.timestamp) {
+    if (historyRecord.timestamp) {
       const visitTime = new Date(historyRecord.timestamp);
       timeElement.textContent = `Visited: ${visitTime.toLocaleString()}`;
     } else {
@@ -424,6 +480,16 @@ class LinkHighlighter {
     }
     
     content.appendChild(timeElement);
+
+    // 添加标题信息（如果有）
+    if (historyRecord.title) {
+      const titleElement = document.createElement('div');
+      titleElement.className = 'tooltip-title';
+      titleElement.textContent = historyRecord.title;
+      titleElement.style.fontWeight = 'bold';
+      titleElement.style.marginBottom = '4px';
+      content.appendChild(titleElement);
+    }
 
     // 添加URL信息
     const urlElement = document.createElement('div');
@@ -433,17 +499,50 @@ class LinkHighlighter {
 
     tooltip.appendChild(content);
 
-    // 定位tooltip
-    this.positionTooltip(tooltip, event);
-
     // 添加到页面
     document.body.appendChild(tooltip);
     this.currentTooltip = tooltip;
 
-    // 显示动画
-    requestAnimationFrame(() => {
+    // 定位tooltip - 使用保存的位置信息
+    this.positionTooltip(tooltip, linkPosition);
+
+    console.log('[LinkHighlighter] Tooltip created and added to DOM');
+
+    // 显示动画 - 使用 setTimeout 确保 DOM 更新完成
+    setTimeout(() => {
       tooltip.classList.add('show');
-    });
+      console.log('[LinkHighlighter] Tooltip show class added, should be visible now');
+      
+      // 调试：检查 tooltip 的实际样式
+      const computedStyle = window.getComputedStyle(tooltip);
+      console.log('[LinkHighlighter] Tooltip computed styles:', {
+        opacity: computedStyle.opacity,
+        display: computedStyle.display,
+        visibility: computedStyle.visibility,
+        position: computedStyle.position,
+        zIndex: computedStyle.zIndex,
+        background: computedStyle.background,
+        left: computedStyle.left,
+        top: computedStyle.top
+      });
+      
+      // 检查CSS规则是否被正确应用
+      const hasShowClass = tooltip.classList.contains('show');
+      console.log('[LinkHighlighter] Tooltip CSS check:', {
+        hasShowClass,
+        className: tooltip.className,
+        expectedOpacity: hasShowClass ? '1' : '0',
+        actualOpacity: computedStyle.opacity
+      });
+      
+      // 如果样式不正确，尝试强制设置
+      if (computedStyle.opacity !== '1') {
+        console.log('[LinkHighlighter] Forcing tooltip visibility...');
+        tooltip.style.opacity = '1';
+        tooltip.style.display = 'block';
+        tooltip.style.visibility = 'visible';
+      }
+    }, 10);
 
     // 设置自动隐藏
     this.tooltipTimer = setTimeout(() => {
@@ -454,24 +553,45 @@ class LinkHighlighter {
   /**
    * 定位tooltip
    */
-  positionTooltip(tooltip, event) {
-    const rect = event.currentTarget.getBoundingClientRect();
+  positionTooltip(tooltip, linkPosition) {
+    // tooltip已经在DOM中，直接获取其尺寸
     const tooltipRect = tooltip.getBoundingClientRect();
     
-    let left = rect.left + window.scrollX;
-    let top = rect.bottom + window.scrollY + 5;
+    let left = linkPosition.left;
+    let top = linkPosition.bottom + 5;
 
-    // 确保tooltip不超出视窗
+    console.log('[LinkHighlighter] Initial positioning:', {
+      linkPosition,
+      tooltipSize: { width: tooltipRect.width, height: tooltipRect.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      scroll: { x: window.scrollX, y: window.scrollY }
+    });
+
+    // 确保tooltip不超出视窗右边
     if (left + tooltipRect.width > window.innerWidth) {
       left = window.innerWidth - tooltipRect.width - 10;
+      console.log('[LinkHighlighter] Adjusted left to avoid overflow:', left);
     }
 
+    // 确保tooltip不超出视窗下边
     if (top + tooltipRect.height > window.innerHeight + window.scrollY) {
-      top = rect.top + window.scrollY - tooltipRect.height - 5;
+      top = linkPosition.top - tooltipRect.height - 5;
+      console.log('[LinkHighlighter] Moved tooltip above link:', top);
     }
 
-    tooltip.style.left = `${Math.max(10, left)}px`;
-    tooltip.style.top = `${Math.max(10, top)}px`;
+    // 确保tooltip不会出现在负坐标
+    const finalLeft = Math.max(10, left);
+    const finalTop = Math.max(10, top);
+
+    tooltip.style.left = `${finalLeft}px`;
+    tooltip.style.top = `${finalTop}px`;
+    
+    console.log('[LinkHighlighter] Final tooltip position:', { 
+      left: finalLeft, 
+      top: finalTop,
+      adjustedLeft: finalLeft !== left,
+      adjustedTop: finalTop !== top
+    });
   }
 
   /**

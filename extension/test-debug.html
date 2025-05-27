@@ -67,16 +67,27 @@
         <div id="extension-status">扩展状态: 检查中...</div>
         <div id="config-status">配置状态: 检查中...</div>
         <div id="links-status">链接扫描: 待开始...</div>
+        
+        <div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px;">
+            <strong>🔧 调试命令:</strong><br/>
+            • 在控制台输入 <code>debugTooltips()</code> 可以手动检查所有 tooltip 的状态<br/>
+            • 在控制台输入 <code>testTooltip()</code> 可以手动创建一个测试 tooltip
+        </div>
     </div>
 
     <div class="debug-section">
-        <h3>🌐 常见网站链接 (这些通常已被访问)</h3>
-        <a href="https://www.google.com">Google Search - 搜索引擎</a>
-        <a href="https://www.github.com">GitHub - 代码托管</a>
-        <a href="https://www.stackoverflow.com">Stack Overflow - 技术问答</a>
-        <a href="https://www.youtube.com">YouTube - 视频平台</a>
-        <a href="https://www.wikipedia.org">Wikipedia - 百科全书</a>
-        <a href="https://www.reddit.com">Reddit - 社交平台</a>
+        <h3>🌐 常见网站链接 (鼠标悬停测试)</h3>
+        <p style="color: #666; font-size: 14px;">
+            💡 <strong>测试说明:</strong> 鼠标悬停在链接上，如果该链接曾被访问过，会显示：<br/>
+            1. 紫色边框高亮 <br/>
+            2. 悬浮提示框显示访问时间和标题
+        </p>
+        <a href="https://www.google.com" title="测试悬停 - Google">Google Search - 搜索引擎</a>
+        <a href="https://www.github.com" title="测试悬停 - GitHub">GitHub - 代码托管</a>
+        <a href="https://www.stackoverflow.com" title="测试悬停 - StackOverflow">Stack Overflow - 技术问答</a>
+        <a href="https://www.youtube.com" title="测试悬停 - YouTube">YouTube - 视频平台</a>
+        <a href="https://www.wikipedia.org" title="测试悬停 - Wikipedia">Wikipedia - 百科全书</a>
+        <a href="https://www.reddit.com" title="测试悬停 - Reddit">Reddit - 社交平台</a>
     </div>
 
     <div class="debug-section">
@@ -155,11 +166,98 @@
             }
         });
 
+        // 监听鼠标悬停事件（用于调试）
+        document.addEventListener('mouseover', (e) => {
+            if (e.target.tagName === 'A' && e.target.href) {
+                console.log('🖱️ Mouse over link:', e.target.href);
+            }
+        });
+
+        // 监听tooltip出现
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE && 
+                        node.classList && node.classList.contains('history-tooltip')) {
+                        console.log('📝 Tooltip appeared:', node);
+                    }
+                });
+            });
+        });
+        observer.observe(document.body, { childList: true });
+
+        // 手动调试函数
+        window.debugTooltips = function() {
+            const tooltips = document.querySelectorAll('.history-tooltip');
+            console.log(`📊 Manual Debug: Found ${tooltips.length} tooltips`);
+            
+            tooltips.forEach((tooltip, index) => {
+                const computedStyle = window.getComputedStyle(tooltip);
+                console.log(`📝 Tooltip ${index}:`, {
+                    element: tooltip,
+                    className: tooltip.className,
+                    opacity: computedStyle.opacity,
+                    display: computedStyle.display,
+                    visibility: computedStyle.visibility,
+                    position: computedStyle.position,
+                    left: computedStyle.left,
+                    top: computedStyle.top,
+                    zIndex: computedStyle.zIndex
+                });
+            });
+            
+            return tooltips;
+        };
+
+        // 手动创建测试 tooltip
+        window.testTooltip = function() {
+            console.log('🧪 Creating test tooltip...');
+            
+            // 创建一个简单的测试 tooltip
+            const testTooltip = document.createElement('div');
+            testTooltip.className = 'history-tooltip show';
+            testTooltip.style.position = 'fixed';
+            testTooltip.style.top = '100px';
+            testTooltip.style.left = '100px';
+            testTooltip.style.zIndex = '10000';
+            testTooltip.style.background = '#333';
+            testTooltip.style.color = 'white';
+            testTooltip.style.padding = '8px 12px';
+            testTooltip.style.borderRadius = '6px';
+            testTooltip.style.opacity = '1';
+            testTooltip.textContent = 'Test Tooltip - Should be visible!';
+            
+            document.body.appendChild(testTooltip);
+            
+            console.log('🧪 Test tooltip created:', testTooltip);
+            
+            // 3秒后移除
+            setTimeout(() => {
+                if (testTooltip.parentNode) {
+                    testTooltip.parentNode.removeChild(testTooltip);
+                    console.log('🧪 Test tooltip removed');
+                }
+            }, 3000);
+            
+            return testTooltip;
+        };
+
         // 定期检查高亮状态
         setInterval(() => {
             const highlightedLinks = document.querySelectorAll('.history-link-highlighted');
-            if (highlightedLinks.length > 0) {
-                console.log(`🎯 Currently ${highlightedLinks.length} links are highlighted`);
+            const tooltips = document.querySelectorAll('.history-tooltip');
+            if (highlightedLinks.length > 0 || tooltips.length > 0) {
+                console.log(`🎯 Status: ${highlightedLinks.length} highlighted links, ${tooltips.length} active tooltips`);
+                
+                // 如果有 tooltip 但看不见，记录详细信息
+                if (tooltips.length > 0) {
+                    tooltips.forEach((tooltip, index) => {
+                        const style = window.getComputedStyle(tooltip);
+                        if (style.opacity === '0') {
+                            console.log(`⚠️  Tooltip ${index} is invisible (opacity: 0)`);
+                        }
+                    });
+                }
             }
         }, 5000);
     </script>
