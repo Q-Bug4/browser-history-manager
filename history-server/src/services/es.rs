@@ -4,7 +4,7 @@ use elasticsearch::{
     Error as ElasticsearchError,
     IndexParts,
 };
-use log::info;
+use tracing::info;
 use serde_json::{json, Value};
 
 pub async fn search_history(
@@ -89,7 +89,7 @@ pub async fn search_history(
         ]
     });
 
-    info!("ES Query: {}", serde_json::to_string_pretty(&body).unwrap());
+    tracing::info!("ES Query: {}", serde_json::to_string_pretty(&body).unwrap());
 
     let response = client
         .search(SearchParts::Index(&["browser-history"]))

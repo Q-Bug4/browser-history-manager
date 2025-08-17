@@ -1,7 +1,7 @@
 use actix_cors::Cors;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder, post};
 use elasticsearch::Elasticsearch;
-use log::{info, error};
+use tracing::{info, error};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
@@ -12,6 +12,7 @@ use serde_json::json;
 
 mod config;
 mod services;
+mod tracing_config;
 
 use crate::config::{AppConfig, ElasticsearchConfig};
 use crate::services::es;
@@ -109,6 +110,7 @@ struct HistoryRequest {
 )]
 #[get("/api/health")]
 async fn health(app_state: web::Data<Arc<AppState>>) -> impl Responder {
+    tracing::info!("Health check: cache={}", app_state.cache.is_some());
     let status = json!({
         "status": "OK",
         "cache_available": app_state.cache.is_some(),
@@ -144,9 +146,9 @@ async fn search_history(
 ) -> impl Responder {
     use crate::services::cache::CacheKeyGenerator;
     
-    // 验证 page_size 的范围
     let page_size = query.page_size.unwrap_or(30).min(1000);
     let page = query.page.unwrap_or(1);
+    tracing::info!(REQUEST = "search_history", keyword = ?query.keyword, domain = ?query.domain, page = page);
     
     // 尝试从缓存获取数据（如果缓存可用）
     if let Some(cache_impl) = &app_state.cache {
@@ -162,14 +164,14 @@ async fn search_history(
         // 尝试从缓存获取数据，任何错误都不影响正常查询
         match cache_impl.get(&cache_key).await {
             Ok(Some(cached_data)) => {
-                info!("Cache hit for key: {}", cache_key);
+                tracing::info!("Cache hit for key: {}", cache_key);
                 return HttpResponse::Ok().json(cached_data);
             }
             Ok(None) => {
-                info!("Cache miss for key: {}", cache_key);
+                tracing::info!("Cache miss for key: {}", cache_key);
             }
             Err(e) => {
-                error!("Cache get error (will fallback to DB): {}", e);
+                tracing::error!("Cache get error (will fallback to DB): {}", e);
             }
         }
     }
@@ -208,9 +210,9 @@ async fn search_history(
                         
                         tokio::spawn(async move {
                             if let Err(e) = cache_clone.set(&cache_key_clone, &response_clone, ttl).await {
-                                error!("Failed to set cache for key {}: {}", cache_key_clone, e);
+                                tracing::error!("Failed to set cache for key {}: {}", cache_key_clone, e);
                             } else {
-                                info!("Cached data for key: {}", cache_key_clone);
+                                tracing::info!("Cached data for key: {}", cache_key_clone);
                             }
                         });
                     }
@@ -220,7 +222,7 @@ async fn search_history(
             HttpResponse::Ok().json(response)
         }
         Err(e) => {
-            error!("Search error: {}", e);
+            tracing::error!(error = %e, "Failed to search history");
             HttpResponse::InternalServerError().json(json!({
                 "error": "Failed to search history",
                 "items": [],
@@ -249,21 +251,16 @@ async fn report_history(
     request: web::Json<HistoryRequest>,
     es_client: web::Data<Arc<Elasticsearch>>,
 ) -> impl Responder {
-    match es::insert_history(
-        &es_client,
-        &request.url,
-        &request.timestamp,
-        &request.domain,
-    ).await {
+    tracing::info!(REQUEST = "report_history", url = %request.url, domain = %request.domain);
+    match es::insert_history(&es_client, &request.url, &request.timestamp, &request.domain).await {
         Ok(_) => {
-            info!("History record added: {}", request.url);
             HttpResponse::Ok().json(json!({
                 "status": "success",
                 "message": "Record added successfully"
             }))
         }
         Err(e) => {
-            error!("Failed to insert history: {}", e);
+            tracing::error!(error = %e, "Failed to insert history record");
             HttpResponse::InternalServerError().json(json!({
                 "status": "error",
                 "message": "Failed to store record"
@@ -274,9 +271,9 @@ async fn report_history(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 启用详细日志
-    env_logger::init();
-    info!("log application starting...");
+    // 初始化 tracing
+    tracing_config::init_tracing().expect("Failed to initialize tracing");
+    tracing::info!("Starting application...");
     
     // 加载配置
     let config = Arc::new(AppConfig::new().expect("Failed to load config"));
@@ -287,11 +284,11 @@ async fn main() -> std::io::Result<()> {
     // 尝试创建缓存客户端 - 默认启用，如果Redis不可用则自动跳过
     let cache_client: Option<Box<dyn Cache>> = match RedisCache::new(&config.cache.redis_url).await {
         Ok(redis_cache) => {
-            info!("✓ Redis cache enabled: {}", config.cache.redis_url);
+            tracing::info!("✓ Redis cache enabled: {}", config.cache.redis_url);
             Some(Box::new(redis_cache))
         }
         Err(e) => {
-            error!("✗ Redis cache unavailable ({}), will fallback to direct DB queries", e);
+            tracing::error!("✗ Redis cache unavailable ({}), will fallback to direct DB queries", e);
             None
         }
     };
@@ -302,16 +299,16 @@ async fn main() -> std::io::Result<()> {
         cache: cache_client,
     });
     
-    info!("✓ AppState created successfully");
-    info!("✓ AppState has cache: {}", app_state.cache.is_some());
+    tracing::info!("✓ AppState created successfully");
+    tracing::info!("✓ AppState has cache: {}", app_state.cache.is_some());
     
     // 生成API文档
     let openapi = ApiDoc::openapi();
 
-    info!("Starting server on {}:{}", config.server.host, config.server.port);
-    info!("Elasticsearch URL: {}", config.elasticsearch.url);
+    tracing::info!("Starting server on {}:{}", config.server.host, config.server.port);
+    tracing::info!("Elasticsearch URL: {}", config.elasticsearch.url);
     if app_state.cache.is_some() {
-        info!("Cache TTL: {} seconds", config.cache.ttl_seconds);
+        tracing::info!("Cache TTL: {} seconds", config.cache.ttl_seconds);
     }
 
     HttpServer::new(move || {
@@ -323,6 +320,7 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(cors)
+            .wrap(tracing_actix_web::TracingLogger::default())  // tracing中间件
             .app_data(web::Data::new(es_client.clone()))
             .app_data(web::Data::new(app_state.clone()))
             .service(
