@@ -501,7 +501,7 @@ class LinkHighlighter {
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
         data: { 
-          urls: [normalizedUrl],  // 使用归一化后的URL查询
+          url: normalizedUrl,  // 使用归一化后的URL查询
           domain: window.location.hostname 
         }
       });
