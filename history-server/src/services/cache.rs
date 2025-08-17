@@ -75,7 +75,7 @@ pub trait Cache: Send + Sync + CacheClone {
 pub struct CacheKeyGenerator;
 
 impl CacheKeyGenerator {
-    /// 为历史搜索生成缓存键
+    /// 为历史搜索生成缓存键 - 基于查询的URL
     pub fn history_search_key(
         keyword: &Option<String>,
         domain: &Option<String>,
@@ -89,10 +89,41 @@ impl CacheKeyGenerator {
         let start_date = start_date.as_ref().map(|s| s.as_str()).unwrap_or("");
         let end_date = end_date.as_ref().map(|s| s.as_str()).unwrap_or("");
         
-        format!(
-            "history:search:{}:{}:{}:{}:{}:{}",
-            keyword, domain, start_date, end_date, page, page_size
-        )
+        // 生成查询URL作为缓存key的一部分
+        let mut query_parts = Vec::new();
+        if !keyword.is_empty() {
+            query_parts.push(format!("keyword={}", keyword));
+        }
+        if !domain.is_empty() {
+            query_parts.push(format!("domain={}", domain));
+        }
+        if !start_date.is_empty() {
+            query_parts.push(format!("startDate={}", start_date));
+        }
+        if !end_date.is_empty() {
+            query_parts.push(format!("endDate={}", end_date));
+        }
+        query_parts.push(format!("page={}", page));
+        query_parts.push(format!("pageSize={}", page_size));
+        
+        let query_url = if query_parts.is_empty() {
+            "/api/history".to_string()
+        } else {
+            format!("/api/history?{}", query_parts.join("&"))
+        };
+        
+        // 使用查询URL的hash作为缓存键
+        format!("history:url:{:x}", Self::hash_string(&query_url))
+    }
+    
+    /// 计算字符串的简单哈希值
+    fn hash_string(s: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
