@@ -37,11 +37,35 @@
         </div>
 
         <div class="setting-item">
-          <label for="urlPatternMap">URL Pattern Mapping:</label>
-          <textarea id="urlPatternMap" class="full-width" rows="4" placeholder='{"https://xxxx\.ai/v1/([\da-zA-Z]+)#94fb3c07-dded-47a9-b50c-79895db83c34_desktop-watch-next-side": "https://xxxx.ai/v1/$1"}'></textarea>
-          <p class="setting-desc">Enter URL pattern mappings as JSON. The key is a regular expression pattern, and the value is the replacement pattern. Use $1, $2, etc. to reference capture groups.</p>
-          <button id="saveUrlPattern" class="action-button">Save</button>
-          <span id="urlPatternStatus" class="status-text"></span>
+          <h3>URL Pattern Mapping</h3>
+          <p class="setting-desc">
+            <strong>Note:</strong> These rules are only used for query normalization. When searching for URLs, the original URL will be matched against these patterns and transformed before querying the backend.
+            Each rule is applied once per URL, and processing stops after the first successful match.
+          </p>
+          
+          <div id="urlMappingsContainer">
+            <div class="url-mapping-header">
+              <span>Regex Pattern (JS)</span>
+              <span>Replacement</span>
+              <span>Actions</span>
+            </div>
+            <div id="urlMappingsList">
+              <!-- URL mappings will be inserted here -->
+            </div>
+            <div class="url-mapping-controls">
+              <button id="addUrlMapping" class="action-button">Add New Rule</button>
+              <span id="urlMappingStatus" class="status-text"></span>
+            </div>
+          </div>
+          
+          <div class="url-mapping-example">
+            <h4>Example:</h4>
+            <div class="example-item">
+              <strong>Pattern:</strong> <code>https://example\.com/video/(\w+)-watch.*</code><br>
+              <strong>Replacement:</strong> <code>https://example.com/video/$1</code><br>
+              <strong>Result:</strong> <code>https://example.com/video/abc123-watch-extra-params</code> → <code>https://example.com/video/abc123</code>
+            </div>
+          </div>
         </div>
       </section>
     </div>

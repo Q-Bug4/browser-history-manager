@@ -21,7 +21,8 @@ export const DEFAULT_CONFIG = {
   maxRetries: 3,
   batchSize: 100,
   requestTimeout: 10000, // 10秒
-  logLevel: 'INFO'
+  logLevel: 'INFO',
+  urlPatternMappings: [] // 新增URL模式映射配置
 };
 
 // API端点
