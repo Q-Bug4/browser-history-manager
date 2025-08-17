@@ -295,6 +295,37 @@ class BackgroundService {
     if (event.newConfig.cacheExpiration !== event.oldConfig.cacheExpiration) {
       this.startCleanupTimer();
     }
+
+    // 通知所有content script配置已更新
+    this.broadcastConfigUpdate(event.newConfig);
+  }
+
+  /**
+   * 向所有content script广播配置更新
+   * @param {Object} newConfig 新配置
+   */
+  async broadcastConfigUpdate(newConfig) {
+    try {
+      // 获取所有tab
+      const tabs = await chrome.tabs.query({});
+      
+      // 向每个tab的content script发送配置更新消息
+      for (const tab of tabs) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: 'CONFIG_UPDATED',
+            data: newConfig
+          });
+        } catch (error) {
+          // 忽略无法发送消息的tab（如chrome://页面）
+          this.logger.debug(`Failed to send config update to tab ${tab.id}:`, error.message);
+        }
+      }
+      
+      this.logger.info('Config update broadcasted to all content scripts');
+    } catch (error) {
+      this.logger.error('Failed to broadcast config update:', error);
+    }
   }
 
   /**

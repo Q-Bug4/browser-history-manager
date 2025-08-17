@@ -41,6 +41,7 @@ class LinkHighlighter {
     this.observer = null;
     this.eventHandlers = new Map();
     this.processNewLinksTimer = null;
+    this.urlPatternMappings = []; // URL模式映射配置
   }
 
   /**
@@ -93,7 +94,10 @@ class LinkHighlighter {
 
       if (response && response.success) {
         this.config = response.data;
+        // 加载URL模式映射配置
+        this.urlPatternMappings = this.config.urlPatternMappings || [];
         console.log('[LinkHighlighter] Config loaded:', this.config);
+        console.log('[LinkHighlighter] URL pattern mappings loaded:', this.urlPatternMappings);
       } else {
         throw new Error(response?.error || 'Failed to get config');
       }
@@ -236,16 +240,57 @@ class LinkHighlighter {
   }
 
   /**
+   * URL归一化处理
+   * 根据配置的模式映射规则将URL转换为归一化形式
+   */
+  normalizeUrl(url) {
+    if (!url || !this.urlPatternMappings || this.urlPatternMappings.length === 0) {
+      return url;
+    }
+
+    try {
+      for (const mapping of this.urlPatternMappings) {
+        if (!mapping.pattern || !mapping.replacement) {
+          continue;
+        }
+
+        try {
+          const regex = new RegExp(mapping.pattern);
+          const normalizedUrl = url.replace(regex, mapping.replacement);
+          
+          // 如果URL发生了变化，说明匹配成功，返回归一化后的URL
+          if (normalizedUrl !== url) {
+            console.log(`[LinkHighlighter] URL normalized: ${url} -> ${normalizedUrl}`);
+            return normalizedUrl;
+          }
+        } catch (regexError) {
+          console.warn(`[LinkHighlighter] Invalid regex pattern: ${mapping.pattern}`, regexError);
+        }
+      }
+    } catch (error) {
+      console.error('[LinkHighlighter] Error normalizing URL:', error);
+    }
+
+    return url; // 如果没有匹配的规则，返回原URL
+  }
+
+  /**
    * 批量检查历史记录
    */
   async batchCheckHistory(urls) {
     try {
       console.log('[LinkHighlighter] Requesting history for URLs:', urls);
       
+      // 先对URL进行归一化处理
+      const normalizedUrls = urls.map(url => this.normalizeUrl(url));
+      const uniqueNormalizedUrls = [...new Set(normalizedUrls)];
+      
+      console.log('[LinkHighlighter] Normalized URLs:', uniqueNormalizedUrls);
+      
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
         data: {
-          urls: urls,
+          urls: uniqueNormalizedUrls,
           domain: window.location.hostname
         }
       });
@@ -255,12 +300,22 @@ class LinkHighlighter {
       if (response && response.success) {
         console.log('[LinkHighlighter] History data:', response.data);
         
-        const historyMap = new Map(Object.entries(response.data || {}));
-        console.log('[LinkHighlighter] History map size:', historyMap.size);
+        const historyMap = new Map();
+        const normalizedHistoryMap = new Map(Object.entries(response.data || {}));
         
-        // 更新缓存
-        for (const [url, record] of historyMap) {
-          this.visitCache.set(url, record);
+        console.log('[LinkHighlighter] Normalized history map size:', normalizedHistoryMap.size);
+        
+        // 为原始URL创建映射，如果归一化URL有历史记录，则原始URL也标记为已访问
+        for (let i = 0; i < urls.length; i++) {
+          const originalUrl = urls[i];
+          const normalizedUrl = normalizedUrls[i];
+          
+          const historyRecord = normalizedHistoryMap.get(normalizedUrl);
+          if (historyRecord) {
+            historyMap.set(originalUrl, historyRecord);
+            this.visitCache.set(originalUrl, historyRecord);
+            console.log(`[LinkHighlighter] Found history for ${originalUrl} via normalized URL ${normalizedUrl}`);
+          }
         }
 
         return historyMap;
@@ -414,10 +469,14 @@ class LinkHighlighter {
     try {
       console.log('[LinkHighlighter] Requesting single history record for:', url);
       
+      // 先对URL进行归一化处理
+      const normalizedUrl = this.normalizeUrl(url);
+      console.log('[LinkHighlighter] Normalized URL for single query:', normalizedUrl);
+      
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
         data: { 
-          urls: [url],  // 使用数组格式，和批量查询保持一致
+          urls: [normalizedUrl],  // 使用归一化后的URL查询
           domain: window.location.hostname 
         }
       });
@@ -429,11 +488,12 @@ class LinkHighlighter {
         
         // 检查返回的数据格式
         if (historyData && typeof historyData === 'object') {
-          // 如果是对象格式，查找对应的URL
-          const record = historyData[url];
+          // 查找归一化URL的记录
+          const record = historyData[normalizedUrl];
           if (record) {
+            // 为原始URL也缓存这个记录
             this.visitCache.set(url, record);
-            console.log('[LinkHighlighter] Found and cached single history record:', record);
+            console.log(`[LinkHighlighter] Found history for ${url} via normalized URL ${normalizedUrl}:`, record);
             return record;
           }
         }
@@ -680,8 +740,44 @@ class LinkHighlighter {
    * 监听配置变化
    */
   listenForConfigChanges() {
-    // 这里可以添加配置变化的监听逻辑
-    // 由于content script的限制，可能需要通过消息传递来实现
+    // 监听来自background script的配置更新消息
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'CONFIG_UPDATED') {
+        console.log('[LinkHighlighter] Config updated, reloading...');
+        this.handleConfigUpdate(message.data);
+        sendResponse({ success: true });
+      }
+    });
+  }
+
+  /**
+   * 处理配置更新
+   */
+  async handleConfigUpdate(newConfig) {
+    try {
+      this.config = newConfig;
+      this.urlPatternMappings = newConfig.urlPatternMappings || [];
+      
+      console.log('[LinkHighlighter] Updated URL pattern mappings:', this.urlPatternMappings);
+
+      // 清除缓存，因为URL归一化规则可能已改变
+      this.visitCache.clear();
+      this.processedUrls.clear();
+
+      // 移除所有现有高亮
+      this.removeAllHighlights();
+
+      // 如果高亮功能被禁用，直接返回
+      if (!this.config.highlightVisitedLinks) {
+        console.log('[LinkHighlighter] Highlighting disabled in updated config');
+        return;
+      }
+
+      // 重新处理所有链接
+      await this.processExistingLinks();
+    } catch (error) {
+      console.error('[LinkHighlighter] Error handling config update:', error);
+    }
   }
 
   /**

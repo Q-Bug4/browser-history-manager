@@ -39,7 +39,8 @@
         <div class="setting-item">
           <h3>URL Pattern Mapping</h3>
           <p class="setting-desc">
-            <strong>Note:</strong> These rules are only used for query normalization. When searching for URLs, the original URL will be matched against these patterns and transformed before querying the backend.
+            <strong>Note:</strong> These rules are used for URL normalization during link highlighting. When checking if a link has been visited, the URL will be matched against these patterns and transformed before querying the history.
+            This allows similar URLs (like <code>abc.com/1#side</code> and <code>abc.com/1-top</code>) to be treated as the same URL (<code>abc.com/1</code>) for highlighting purposes.
             Each rule is applied once per URL, and processing stops after the first successful match.
           </p>
           
@@ -61,9 +62,10 @@
           <div class="url-mapping-example">
             <h4>Example:</h4>
             <div class="example-item">
-              <strong>Pattern:</strong> <code>https://example\.com/video/(\w+)-watch.*</code><br>
-              <strong>Replacement:</strong> <code>https://example.com/video/$1</code><br>
-              <strong>Result:</strong> <code>https://example.com/video/abc123-watch-extra-params</code> → <code>https://example.com/video/abc123</code>
+              <strong>Pattern:</strong> <code>https://abc\.com/(\d+).*</code><br>
+              <strong>Replacement:</strong> <code>https://abc.com/$1</code><br>
+              <strong>Result:</strong> Both <code>https://abc.com/1#side</code> and <code>https://abc.com/1-top</code> → <code>https://abc.com/1</code><br>
+              <em>This means visiting either URL will highlight both links on the page.</em>
             </div>
           </div>
         </div>
