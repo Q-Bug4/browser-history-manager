@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use log::info;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -111,7 +112,7 @@ impl CacheKeyGenerator {
         } else {
             format!("/api/history?{}", query_parts.join("&"))
         };
-        
+        info!("cache key generating query_url: {}", query_url);
         // 使用查询URL的hash作为缓存键
         format!("history:url:{:x}", Self::hash_string(&query_url))
     }

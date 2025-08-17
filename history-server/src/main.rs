@@ -1,6 +1,7 @@
 use actix_cors::Cors;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder, post};
 use elasticsearch::Elasticsearch;
+use log::{info, error};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
@@ -161,14 +162,14 @@ async fn search_history(
         // 尝试从缓存获取数据，任何错误都不影响正常查询
         match cache_impl.get(&cache_key).await {
             Ok(Some(cached_data)) => {
-                println!("Cache hit for key: {}", cache_key);
+                info!("Cache hit for key: {}", cache_key);
                 return HttpResponse::Ok().json(cached_data);
             }
             Ok(None) => {
-                println!("Cache miss for key: {}", cache_key);
+                info!("Cache miss for key: {}", cache_key);
             }
             Err(e) => {
-                eprintln!("Cache get error (will fallback to DB): {}", e);
+                error!("Cache get error (will fallback to DB): {}", e);
             }
         }
     }
@@ -207,9 +208,9 @@ async fn search_history(
                         
                         tokio::spawn(async move {
                             if let Err(e) = cache_clone.set(&cache_key_clone, &response_clone, ttl).await {
-                                eprintln!("Failed to set cache for key {}: {}", cache_key_clone, e);
+                                error!("Failed to set cache for key {}: {}", cache_key_clone, e);
                             } else {
-                                println!("Cached data for key: {}", cache_key_clone);
+                                info!("Cached data for key: {}", cache_key_clone);
                             }
                         });
                     }
@@ -219,7 +220,7 @@ async fn search_history(
             HttpResponse::Ok().json(response)
         }
         Err(e) => {
-            eprintln!("Search error: {}", e);
+            error!("Search error: {}", e);
             HttpResponse::InternalServerError().json(json!({
                 "error": "Failed to search history",
                 "items": [],
@@ -255,14 +256,14 @@ async fn report_history(
         &request.domain,
     ).await {
         Ok(_) => {
-            println!("History record added: {}", request.url);
+            info!("History record added: {}", request.url);
             HttpResponse::Ok().json(json!({
                 "status": "success",
                 "message": "Record added successfully"
             }))
         }
         Err(e) => {
-            eprintln!("Failed to insert history: {}", e);
+            error!("Failed to insert history: {}", e);
             HttpResponse::InternalServerError().json(json!({
                 "status": "error",
                 "message": "Failed to store record"
@@ -275,6 +276,7 @@ async fn report_history(
 async fn main() -> std::io::Result<()> {
     // 启用详细日志
     env_logger::init();
+    info!("log application starting...");
     
     // 加载配置
     let config = Arc::new(AppConfig::new().expect("Failed to load config"));
@@ -285,11 +287,11 @@ async fn main() -> std::io::Result<()> {
     // 尝试创建缓存客户端 - 默认启用，如果Redis不可用则自动跳过
     let cache_client: Option<Box<dyn Cache>> = match RedisCache::new(&config.cache.redis_url).await {
         Ok(redis_cache) => {
-            println!("✓ Redis cache enabled: {}", config.cache.redis_url);
+            info!("✓ Redis cache enabled: {}", config.cache.redis_url);
             Some(Box::new(redis_cache))
         }
         Err(e) => {
-            eprintln!("✗ Redis cache unavailable ({}), will fallback to direct DB queries", e);
+            error!("✗ Redis cache unavailable ({}), will fallback to direct DB queries", e);
             None
         }
     };
@@ -300,16 +302,16 @@ async fn main() -> std::io::Result<()> {
         cache: cache_client,
     });
     
-    println!("✓ AppState created successfully");
-    println!("✓ AppState has cache: {}", app_state.cache.is_some());
+    info!("✓ AppState created successfully");
+    info!("✓ AppState has cache: {}", app_state.cache.is_some());
     
     // 生成API文档
     let openapi = ApiDoc::openapi();
 
-    println!("Starting server on {}:{}", config.server.host, config.server.port);
-    println!("Elasticsearch URL: {}", config.elasticsearch.url);
+    info!("Starting server on {}:{}", config.server.host, config.server.port);
+    info!("Elasticsearch URL: {}", config.elasticsearch.url);
     if app_state.cache.is_some() {
-        println!("Cache TTL: {} seconds", config.cache.ttl_seconds);
+        info!("Cache TTL: {} seconds", config.cache.ttl_seconds);
     }
 
     HttpServer::new(move || {
