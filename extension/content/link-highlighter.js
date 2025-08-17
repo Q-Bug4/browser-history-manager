@@ -145,7 +145,9 @@ class LinkHighlighter {
         font-size: 12px !important;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
-        max-width: 300px !important;
+        max-width: 400px !important;
+        max-height: 300px !important;
+        overflow-y: auto !important;
         word-wrap: break-word !important;
         opacity: 0 !important;
         transition: opacity 0.2s ease !important;
@@ -242,14 +244,18 @@ class LinkHighlighter {
   /**
    * URL归一化处理
    * 根据配置的模式映射规则将URL转换为归一化形式
+   * @param {string} url 原始URL
+   * @param {boolean} returnDetails 是否返回详细信息
+   * @returns {string|Object} 归一化后的URL或详细信息对象
    */
-  normalizeUrl(url) {
+  normalizeUrl(url, returnDetails = false) {
     if (!url || !this.urlPatternMappings || this.urlPatternMappings.length === 0) {
-      return url;
+      return returnDetails ? { normalizedUrl: url, applied: false } : url;
     }
 
     try {
-      for (const mapping of this.urlPatternMappings) {
+      for (let i = 0; i < this.urlPatternMappings.length; i++) {
+        const mapping = this.urlPatternMappings[i];
         if (!mapping.pattern || !mapping.replacement) {
           continue;
         }
@@ -258,9 +264,23 @@ class LinkHighlighter {
           const regex = new RegExp(mapping.pattern);
           const normalizedUrl = url.replace(regex, mapping.replacement);
           
-          // 如果URL发生了变化，说明匹配成功，返回归一化后的URL
+          // 如果URL发生了变化，说明匹配成功
           if (normalizedUrl !== url) {
             console.log(`[LinkHighlighter] URL normalized: ${url} -> ${normalizedUrl}`);
+            
+            if (returnDetails) {
+              return {
+                originalUrl: url,
+                normalizedUrl: normalizedUrl,
+                applied: true,
+                rule: {
+                  index: i + 1,
+                  pattern: mapping.pattern,
+                  replacement: mapping.replacement
+                }
+              };
+            }
+            
             return normalizedUrl;
           }
         } catch (regexError) {
@@ -271,7 +291,12 @@ class LinkHighlighter {
       console.error('[LinkHighlighter] Error normalizing URL:', error);
     }
 
-    return url; // 如果没有匹配的规则，返回原URL
+    // 如果没有匹配的规则，返回原URL
+    return returnDetails ? { 
+      originalUrl: url,
+      normalizedUrl: url, 
+      applied: false 
+    } : url;
   }
 
   /**
@@ -555,7 +580,56 @@ class LinkHighlighter {
     const urlElement = document.createElement('div');
     urlElement.className = 'tooltip-url';
     urlElement.textContent = link.href;
+    urlElement.style.wordBreak = 'break-all';
+    urlElement.style.fontSize = '12px';
+    urlElement.style.color = '#666';
     content.appendChild(urlElement);
+
+    // 添加URL归一化信息
+    const normalizationInfo = this.normalizeUrl(link.href, true);
+    if (normalizationInfo.applied) {
+      const normalizationSection = document.createElement('div');
+      normalizationSection.className = 'tooltip-normalization';
+      normalizationSection.style.marginTop = '8px';
+      normalizationSection.style.padding = '6px';
+      normalizationSection.style.backgroundColor = '#f0f8ff';
+      normalizationSection.style.border = '1px solid #e0e0e0';
+      normalizationSection.style.borderRadius = '3px';
+      normalizationSection.style.fontSize = '11px';
+
+      // 标题
+      const titleElement = document.createElement('div');
+      titleElement.textContent = '🔧 URL Normalization Applied';
+      titleElement.style.fontWeight = 'bold';
+      titleElement.style.color = '#2196f3';
+      titleElement.style.marginBottom = '4px';
+      normalizationSection.appendChild(titleElement);
+
+      // 规则信息
+      const ruleElement = document.createElement('div');
+      ruleElement.innerHTML = `
+        <div style="margin-bottom: 2px;"><strong>Rule ${normalizationInfo.rule.index}:</strong></div>
+        <div style="margin-bottom: 2px; font-family: monospace; color: #d73502;">Pattern: ${this.escapeHtml(normalizationInfo.rule.pattern)}</div>
+        <div style="margin-bottom: 4px; font-family: monospace; color: #0066cc;">Replace: ${this.escapeHtml(normalizationInfo.rule.replacement)}</div>
+      `;
+      normalizationSection.appendChild(ruleElement);
+
+      // 转换结果
+      if (normalizationInfo.originalUrl !== normalizationInfo.normalizedUrl) {
+        const resultElement = document.createElement('div');
+        resultElement.innerHTML = `
+          <div style="margin-bottom: 2px;"><strong>Result:</strong></div>
+          <div style="font-family: monospace; color: #666; word-break: break-all;">
+            ${this.escapeHtml(normalizationInfo.originalUrl)} 
+            <div style="text-align: center; color: #2196f3; margin: 2px 0;">↓</div>
+            ${this.escapeHtml(normalizationInfo.normalizedUrl)}
+          </div>
+        `;
+        normalizationSection.appendChild(resultElement);
+      }
+
+      content.appendChild(normalizationSection);
+    }
 
     tooltip.appendChild(content);
 
@@ -828,6 +902,15 @@ class LinkHighlighter {
 
     this.initialized = false;
     console.log('[LinkHighlighter] Destroyed');
+  }
+
+  /**
+   * 转义HTML字符，防止XSS攻击
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 }
 
