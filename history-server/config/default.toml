@@ -5,3 +5,8 @@ index = "browser-history"
 [server]
 host = "127.0.0.1"
 port = 8080
+
+[cache]
+enabled = true
+redis_url = "redis://localhost:6379"
+ttl_seconds = 120

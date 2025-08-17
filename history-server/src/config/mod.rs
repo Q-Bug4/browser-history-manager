@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub struct AppConfig {
     pub elasticsearch: ElasticsearchConfig,
     pub server: ServerConfig,
+    pub cache: CacheConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +17,18 @@ pub struct ElasticsearchConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CacheConfig {
+    pub enabled: bool,
+    pub redis_url: String,
+    pub ttl_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RedisConfig {
+    pub url: String,
 }
 
 impl AppConfig {

@@ -19,3 +19,5 @@ uuid = { version = "1.6.1", features = ["v4"] }
 actix-cors = "0.6"
 utoipa = { version = "4.1", features = ["actix_extras", "chrono"] }
 utoipa-swagger-ui = { version = "5.0", features = ["actix-web"] }
+redis = { version = "0.25.2", features = ["aio", "tokio-comp"] }
+async-trait = "0.1.77"

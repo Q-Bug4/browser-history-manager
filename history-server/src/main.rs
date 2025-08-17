@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 use std::sync::Arc;
+use std::time::Duration;
 use elasticsearch::http::transport::Transport;
 use serde_json::json;
 
@@ -13,6 +14,15 @@ mod services;
 
 use crate::config::{AppConfig, ElasticsearchConfig};
 use crate::services::es;
+use crate::services::cache::Cache;
+use crate::services::redis_cache::RedisCache;
+
+// 应用状态结构体 - 存储全局配置和缓存实例
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<AppConfig>,
+    pub cache: Option<Box<dyn Cache>>, // 如果Redis可用则有缓存，否则为None
+}
 
 // 获取 ES 客户端的函数
 async fn create_es_client(config: &ElasticsearchConfig) -> Elasticsearch {
@@ -97,8 +107,13 @@ struct HistoryRequest {
     )
 )]
 #[get("/api/health")]
-async fn health() -> impl Responder {
-    HttpResponse::Ok().json("OK")
+async fn health(app_state: web::Data<Arc<AppState>>) -> impl Responder {
+    let status = json!({
+        "status": "OK",
+        "cache_available": app_state.cache.is_some(),
+        "cache_ttl": app_state.config.cache.ttl_seconds
+    });
+    HttpResponse::Ok().json(status)
 }
 
 /// Search browser history
@@ -124,20 +139,83 @@ async fn health() -> impl Responder {
 async fn search_history(
     query: web::Query<SearchQuery>,
     es_client: web::Data<Arc<Elasticsearch>>,
+    app_state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
+    use crate::services::cache::CacheKeyGenerator;
+    
     // 验证 page_size 的范围
     let page_size = query.page_size.unwrap_or(30).min(1000);
+    let page = query.page.unwrap_or(1);
     
+    // 尝试从缓存获取数据（如果缓存可用）
+    if let Some(cache_impl) = &app_state.cache {
+        let cache_key = CacheKeyGenerator::history_search_key(
+            &query.keyword,
+            &query.domain,
+            &query.start_date,
+            &query.end_date,
+            page,
+            page_size,
+        );
+        
+        // 尝试从缓存获取数据，任何错误都不影响正常查询
+        match cache_impl.get(&cache_key).await {
+            Ok(Some(cached_data)) => {
+                println!("Cache hit for key: {}", cache_key);
+                return HttpResponse::Ok().json(cached_data);
+            }
+            Ok(None) => {
+                println!("Cache miss for key: {}", cache_key);
+            }
+            Err(e) => {
+                eprintln!("Cache get error (will fallback to DB): {}", e);
+            }
+        }
+    }
+    
+    // 从Elasticsearch查询数据
     match es::search_history(
         &es_client,
         query.keyword.clone(),
         query.domain.clone(),
         query.start_date.clone(),
         query.end_date.clone(),
-        query.page,
-        Some(page_size), // 确保传入验证后的 page_size
+        Some(page),
+        Some(page_size),
     ).await {
         Ok(response) => {
+            // 如果有缓存且查询成功有数据，异步写入缓存
+            if let Some(cache_impl) = &app_state.cache {
+                // 检查是否有数据（items数组不为空）
+                if let Some(items) = response.get("items").and_then(|v| v.as_array()) {
+                    if !items.is_empty() {
+                        let cache_key = CacheKeyGenerator::history_search_key(
+                            &query.keyword,
+                            &query.domain,
+                            &query.start_date,
+                            &query.end_date,
+                            page,
+                            page_size,
+                        );
+                        
+                        let ttl = Duration::from_secs(app_state.config.cache.ttl_seconds);
+                        
+                        // 异步写入缓存，不阻塞响应，缓存失败不影响结果返回
+                        let cache_clone = cache_impl.clone();
+                        let response_clone = response.clone();
+                        let cache_key_clone = cache_key.clone();
+                        
+                        tokio::spawn(async move {
+                            if let Err(e) = cache_clone.set(&cache_key_clone, &response_clone, ttl).await {
+                                eprintln!("Failed to set cache for key {}: {}", cache_key_clone, e);
+                            } else {
+                                println!("Cached data for key: {}", cache_key_clone);
+                            }
+                        });
+                    }
+                }
+            }
+            
             HttpResponse::Ok().json(response)
         }
         Err(e) => {
@@ -146,7 +224,7 @@ async fn search_history(
                 "error": "Failed to search history",
                 "items": [],
                 "total": 0,
-                "page": query.page.unwrap_or(1),
+                "page": page,
                 "pageSize": page_size
             }))
         }
@@ -195,17 +273,44 @@ async fn report_history(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // 启用详细日志
+    env_logger::init();
+    
     // 加载配置
-    let config = AppConfig::new().expect("Failed to load config");
+    let config = Arc::new(AppConfig::new().expect("Failed to load config"));
     
     // 创建 ES 客户端
     let es_client = Arc::new(create_es_client(&config.elasticsearch).await);
+    
+    // 尝试创建缓存客户端 - 默认启用，如果Redis不可用则自动跳过
+    let cache_client: Option<Box<dyn Cache>> = match RedisCache::new(&config.cache.redis_url).await {
+        Ok(redis_cache) => {
+            println!("✓ Redis cache enabled: {}", config.cache.redis_url);
+            Some(Box::new(redis_cache))
+        }
+        Err(e) => {
+            eprintln!("✗ Redis cache unavailable ({}), will fallback to direct DB queries", e);
+            None
+        }
+    };
+
+    // 创建应用状态
+    let app_state = Arc::new(AppState {
+        config: config.clone(),
+        cache: cache_client,
+    });
+    
+    println!("✓ AppState created successfully");
+    println!("✓ AppState has cache: {}", app_state.cache.is_some());
     
     // 生成API文档
     let openapi = ApiDoc::openapi();
 
     println!("Starting server on {}:{}", config.server.host, config.server.port);
     println!("Elasticsearch URL: {}", config.elasticsearch.url);
+    if app_state.cache.is_some() {
+        println!("Cache TTL: {} seconds", config.cache.ttl_seconds);
+    }
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -217,6 +322,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(web::Data::new(es_client.clone()))
+            .app_data(web::Data::new(app_state.clone()))
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", openapi.clone()),
