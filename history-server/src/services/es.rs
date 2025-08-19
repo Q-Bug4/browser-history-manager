@@ -167,7 +167,7 @@ pub async fn search_history_by_normalized_url(
     let query = json!({
         "query": {
             "term": {
-                "normalized_url": normalized_url
+                "normalized_url.keyword": normalized_url
             }
         },
         "size": 1,
@@ -208,7 +208,7 @@ pub async fn search_history_by_normalized_urls(
     let query = json!({
         "query": {
             "terms": {
-                "normalized_url": normalized_urls
+                "normalized_url.keyword": normalized_urls
             }
         },
         "size": normalized_urls.len(),
