@@ -37,4 +37,66 @@ export async function searchHistory(params) {
     console.error('API Error:', error);
     throw error;
   }
+}
+
+// ========== URL Normalization Rules API ==========
+
+export async function getNormalizationRules() {
+  try {
+    const response = await api.get('/backend/api/normalization-rules');
+    return response.data;
+  } catch (error) {
+    console.error('Get normalization rules error:', error);
+    throw error;
+  }
+}
+
+export async function createNormalizationRule(rule) {
+  try {
+    const response = await api.post('/backend/api/normalization-rules', rule);
+    return response.data;
+  } catch (error) {
+    console.error('Create normalization rule error:', error);
+    throw error;
+  }
+}
+
+export async function updateNormalizationRule(id, rule) {
+  try {
+    const response = await api.put(`/backend/api/normalization-rules/${id}`, rule);
+    return response.data;
+  } catch (error) {
+    console.error('Update normalization rule error:', error);
+    throw error;
+  }
+}
+
+export async function deleteNormalizationRule(id) {
+  try {
+    const response = await api.delete(`/backend/api/normalization-rules/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Delete normalization rule error:', error);
+    throw error;
+  }
+}
+
+export async function testNormalizationRule(ruleData) {
+  try {
+    const response = await api.post('/backend/api/normalization-rules/test', ruleData);
+    return response.data;
+  } catch (error) {
+    console.error('Test normalization rule error:', error);
+    throw error;
+  }
+}
+
+export async function refreshRulesCache() {
+  try {
+    const response = await api.post('/backend/api/normalization-rules/refresh-cache');
+    return response.data;
+  } catch (error) {
+    console.error('Refresh rules cache error:', error);
+    throw error;
+  }
 } 

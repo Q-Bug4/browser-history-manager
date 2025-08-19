@@ -12,18 +12,24 @@ use serde_json::json;
 
 mod config;
 mod services;
+mod handlers;
 mod tracing_config;
 
 use crate::config::{AppConfig, ElasticsearchConfig};
 use crate::services::es;
 use crate::services::cache::Cache;
 use crate::services::redis_cache::RedisCache;
+use crate::services::database::DatabaseService;
+use crate::services::url_normalizer::UrlNormalizer;
+use crate::handlers::normalization;
 
-// 应用状态结构体 - 存储全局配置和缓存实例
+// 应用状态结构体 - 存储全局配置和服务实例
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
     pub cache: Option<Box<dyn Cache>>, // 如果Redis可用则有缓存，否则为None
+    pub database: Arc<DatabaseService>,
+    pub url_normalizer: Arc<UrlNormalizer>,
 }
 
 // 获取 ES 客户端的函数
@@ -40,12 +46,20 @@ async fn create_es_client(config: &ElasticsearchConfig) -> Elasticsearch {
         health,
         search_history,
         report_history,
+        query_history_by_urls,
+        normalization::get_rules,
+        normalization::create_rule,
+        normalization::update_rule,
+        normalization::delete_rule,
+        normalization::test_rule,
+        normalization::refresh_cache,
     ),
     components(
-        schemas(HistoryRecord, HistoryRequest)
+        schemas(HistoryRecord, HistoryRequest, UrlQueryRequest)
     ),
     tags(
-        (name = "history", description = "Browser History API")
+        (name = "history", description = "Browser History API"),
+        (name = "normalization", description = "URL Normalization Rules API")
     )
 )]
 struct ApiDoc;
@@ -91,12 +105,25 @@ fn default_page_size() -> Option<i32> {
 // Add new request model
 #[derive(Deserialize, ToSchema)]
 struct HistoryRequest {
+    // 支持新旧两种字段名：url（旧）和 original_url（新）
+    #[serde(alias = "original_url")]
     #[schema(example = "https://example.com")]
     url: String,
     #[schema(example = "2024-03-19T10:30:00Z")]
     timestamp: String,
     #[schema(example = "example.com")]
     domain: String,
+}
+
+// URL查询请求模型
+#[derive(Debug, Deserialize, ToSchema)]
+struct UrlQueryRequest {
+    // 支持单个URL查询
+    #[serde(alias = "original_url")]
+    url: Option<String>,
+    // 支持批量URL查询
+    #[serde(alias = "original_urls")]
+    urls: Option<Vec<String>>,
 }
 
 /// Check service health
@@ -250,13 +277,23 @@ async fn search_history(
 async fn report_history(
     request: web::Json<HistoryRequest>,
     es_client: web::Data<Arc<Elasticsearch>>,
+    app_state: web::Data<Arc<AppState>>,
 ) -> impl Responder {
     tracing::info!(REQUEST = "report_history", url = %request.url, domain = %request.domain);
-    match es::insert_history(&es_client, &request.url, &request.timestamp, &request.domain).await {
+    
+    // 获取原始URL和归一化URL
+    let original_url = &request.url;
+    let normalized_url = app_state.url_normalizer.normalize_url(original_url).await;
+    
+    tracing::info!("URL normalization: {} -> {}", original_url, normalized_url);
+    
+    match es::insert_history(&es_client, original_url, &normalized_url, &request.timestamp, &request.domain).await {
         Ok(_) => {
             HttpResponse::Ok().json(json!({
                 "status": "success",
-                "message": "Record added successfully"
+                "message": "Record added successfully",
+                "original_url": original_url,
+                "normalized_url": normalized_url
             }))
         }
         Err(e) => {
@@ -264,6 +301,82 @@ async fn report_history(
             HttpResponse::InternalServerError().json(json!({
                 "status": "error",
                 "message": "Failed to store record"
+            }))
+        }
+    }
+}
+
+/// Query history by URLs with normalization
+#[utoipa::path(
+    post,
+    path = "/api/history/query",
+    tag = "history",
+    request_body = UrlQueryRequest,
+    responses(
+        (status = 200, description = "Query results"),
+        (status = 400, description = "Invalid request data"),
+        (status = 500, description = "Internal server error")
+    )
+)]
+#[post("/api/history/query")]
+async fn query_history_by_urls(
+    request: web::Json<UrlQueryRequest>,
+    es_client: web::Data<Arc<Elasticsearch>>,
+    app_state: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    tracing::info!(REQUEST = "query_history_by_urls", request = ?request);
+    
+    // 收集所有需要查询的URL
+    let mut original_urls = Vec::new();
+    
+    if let Some(url) = &request.url {
+        original_urls.push(url.clone());
+    }
+    
+    if let Some(urls) = &request.urls {
+        original_urls.extend(urls.clone());
+    }
+    
+    if original_urls.is_empty() {
+        return HttpResponse::BadRequest().json(json!({
+            "status": "error",
+            "message": "No URLs provided for query"
+        }));
+    }
+    
+    // 归一化所有URL
+    let mut url_mapping = std::collections::HashMap::new();
+    let mut normalized_urls = Vec::new();
+    
+    for original_url in &original_urls {
+        let normalized = app_state.url_normalizer.normalize_url(original_url).await;
+        url_mapping.insert(normalized.clone(), original_url.clone());
+        normalized_urls.push(normalized);
+    }
+    
+    // 查询ES
+    match es::search_history_by_normalized_urls(&es_client, normalized_urls).await {
+        Ok(results) => {
+            // 将结果映射回原始URL
+            let mut response_data = std::collections::HashMap::new();
+            
+            for (normalized_url, record) in results {
+                if let Some(original_url) = url_mapping.get(&normalized_url) {
+                    response_data.insert(original_url.clone(), record);
+                }
+            }
+            
+            HttpResponse::Ok().json(json!({
+                "status": "success",
+                "data": response_data,
+                "total": response_data.len()
+            }))
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to query history by URLs");
+            HttpResponse::InternalServerError().json(json!({
+                "status": "error",
+                "message": "Failed to query history"
             }))
         }
     }
@@ -281,6 +394,30 @@ async fn main() -> std::io::Result<()> {
     // 创建 ES 客户端
     let es_client = Arc::new(create_es_client(&config.elasticsearch).await);
     
+    // 创建数据库服务
+    let database = match DatabaseService::new(&config.database.url).await {
+        Ok(db) => {
+            tracing::info!("✓ Database connected: {}", config.database.url);
+            
+            // 初始化数据库表
+            if let Err(e) = db.init_tables().await {
+                tracing::error!("✗ Failed to initialize database tables: {}", e);
+                panic!("Failed to initialize database tables: {}", e);
+            }
+            tracing::info!("✓ Database tables initialized");
+            
+            Arc::new(db)
+        }
+        Err(e) => {
+            tracing::error!("✗ Database connection failed: {}", e);
+            panic!("Failed to connect to database: {}", e);
+        }
+    };
+
+    // 创建URL归一化服务
+    let url_normalizer = Arc::new(UrlNormalizer::new(database.clone()));
+    tracing::info!("✓ URL normalizer initialized");
+
     // 尝试创建缓存客户端 - 默认启用，如果Redis不可用则自动跳过
     let cache_client: Option<Box<dyn Cache>> = match RedisCache::new(&config.cache.redis_url).await {
         Ok(redis_cache) => {
@@ -297,6 +434,8 @@ async fn main() -> std::io::Result<()> {
     let app_state = Arc::new(AppState {
         config: config.clone(),
         cache: cache_client,
+        database,
+        url_normalizer,
     });
     
     tracing::info!("✓ AppState created successfully");
@@ -330,6 +469,14 @@ async fn main() -> std::io::Result<()> {
             .service(health)
             .service(search_history)
             .service(report_history)
+            .service(query_history_by_urls)
+            // 规则管理API
+            .service(normalization::get_rules)
+            .service(normalization::create_rule)
+            .service(normalization::update_rule)
+            .service(normalization::delete_rule)
+            .service(normalization::test_rule)
+            .service(normalization::refresh_cache)
     })
     .bind((config.server.host.as_str(), config.server.port))?
     .run()

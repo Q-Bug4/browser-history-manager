@@ -22,3 +22,5 @@ utoipa = { version = "4.1", features = ["actix_extras", "chrono"] }
 utoipa-swagger-ui = { version = "5.0", features = ["actix-web"] }
 redis = { version = "0.25.2", features = ["aio", "tokio-comp"] }
 async-trait = "0.1.77"
+sqlx = { version = "0.6", features = ["postgres", "runtime-tokio-rustls", "chrono", "uuid"] }
+regex = "1.10"

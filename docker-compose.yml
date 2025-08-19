@@ -18,6 +18,18 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
 
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: history_manager
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./history-server/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
   history-server:
     build:
       context: ./history-server
@@ -27,9 +39,12 @@ services:
     environment:
       - APP__ELASTICSEARCH__URL=http://elasticsearch:9200
       - APP__CACHE__REDIS_URL=redis://redis:6379
+      - APP__DATABASE__URL=postgresql://app:password@postgres:5432/history_manager
       - RUST_LOG=info
     depends_on:
       - elasticsearch
+      - postgres
+      - redis
 
   frontend:
     build:
@@ -42,4 +57,5 @@ services:
 
 volumes:
   es_data:
-  redis_data: 
+  redis_data:
+  postgres_data: 

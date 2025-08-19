@@ -10,3 +10,6 @@ port = 8080
 enabled = true
 redis_url = "redis://localhost:6379"
 ttl_seconds = 120
+
+[database]
+url = "postgresql://app:password@localhost:5432/history_manager"

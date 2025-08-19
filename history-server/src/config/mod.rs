@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub elasticsearch: ElasticsearchConfig,
     pub server: ServerConfig,
     pub cache: CacheConfig,
+    pub database: DatabaseConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +25,11 @@ pub struct CacheConfig {
     pub enabled: bool,
     pub redis_url: String,
     pub ttl_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize)]

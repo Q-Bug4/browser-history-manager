@@ -1,38 +1,65 @@
 <template>
   <v-app>
+    <v-app-bar color="primary" dark>
+      <v-app-bar-title>History Manager</v-app-bar-title>
+      <v-spacer></v-spacer>
+      <v-btn
+        :variant="currentTab === 'history' ? 'elevated' : 'text'"
+        @click="currentTab = 'history'"
+      >
+        <v-icon>mdi-history</v-icon>
+        History
+      </v-btn>
+      <v-btn
+        :variant="currentTab === 'rules' ? 'elevated' : 'text'"
+        @click="currentTab = 'rules'"
+      >
+        <v-icon>mdi-cog</v-icon>
+        URL Rules
+      </v-btn>
+    </v-app-bar>
+
     <v-main>
       <v-container>
-        <h1 class="text-h4 mb-6">Browser History</h1>
-        
-        <search-filters
-          v-model:keyword="filters.keyword"
-          v-model:domain="filters.domain"
-          v-model:dateRange="filters.dateRange"
-          :loading="loading"
-          @search="fetchHistory"
-        />
+        <!-- History Tab -->
+        <div v-if="currentTab === 'history'">
+          <h1 class="text-h4 mb-6">Browser History</h1>
+          
+          <search-filters
+            v-model:keyword="filters.keyword"
+            v-model:domain="filters.domain"
+            v-model:dateRange="filters.dateRange"
+            :loading="loading"
+            @search="fetchHistory"
+          />
 
-        <div class="d-flex align-center justify-space-between mt-6 mb-2">
-          <span class="text-subtitle-1">
-            Total Records: {{ totalItems }}
-          </span>
+          <div class="d-flex align-center justify-space-between mt-6 mb-2">
+            <span class="text-subtitle-1">
+              Total Records: {{ totalItems }}
+            </span>
+          </div>
+
+          <history-table
+            :loading="loading"
+            :items="historyItems"
+            :page="pagination.page"
+            :page-size="pagination.itemsPerPage"
+          />
+
+          <custom-pagination
+            v-model:page="pagination.page"
+            v-model:itemsPerPage="pagination.itemsPerPage"
+            :total="totalItems"
+            @update:page="fetchHistory"
+            @update:itemsPerPage="fetchHistory"
+            class="mt-4"
+          />
         </div>
 
-        <history-table
-          :loading="loading"
-          :items="historyItems"
-          :page="pagination.page"
-          :page-size="pagination.itemsPerPage"
-        />
-
-        <custom-pagination
-          v-model:page="pagination.page"
-          v-model:itemsPerPage="pagination.itemsPerPage"
-          :total="totalItems"
-          @update:page="fetchHistory"
-          @update:itemsPerPage="fetchHistory"
-          class="mt-4"
-        />
+        <!-- Rules Tab -->
+        <div v-if="currentTab === 'rules'">
+          <rule-manager />
+        </div>
       </v-container>
     </v-main>
   </v-app>
@@ -43,7 +70,10 @@ import { ref, reactive } from 'vue';
 import SearchFilters from './components/SearchFilters.vue';
 import HistoryTable from './components/HistoryTable.vue';
 import CustomPagination from './components/CustomPagination.vue';
+import RuleManager from './components/RuleManager.vue';
 import { searchHistory } from './services/api';
+
+const currentTab = ref('history');
 
 const loading = ref(false);
 const historyItems = ref([]);
