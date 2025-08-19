@@ -39,10 +39,7 @@ class OptionsManager {
     this.saveNotificationButton = document.getElementById('saveNotification');
     this.notificationStatus = document.getElementById('notificationStatus');
     
-    // URL Pattern Mapping elements
-    this.urlMappingsList = document.getElementById('urlMappingsList');
-    this.addUrlMappingButton = document.getElementById('addUrlMapping');
-    this.urlMappingStatus = document.getElementById('urlMappingStatus');
+
     
     // Sync tab elements
     this.pendingCountElement = document.getElementById('pendingCount');
@@ -78,7 +75,6 @@ class OptionsManager {
         }
         
         this.updateSettingsDisplay(config);
-        this.loadUrlMappings(config.urlPatternMappings || []);
       } else {
         console.error('Failed to load config:', response.error);
         this.loadDefaultConfig();
@@ -148,9 +144,7 @@ class OptionsManager {
         case 'clearCache':
           this.clearCache();
           break;
-        case 'addUrlMapping':
-          this.addUrlMapping();
-          break;
+
         case 'retryAll':
           this.retryAllPendingRecords();
           break;
@@ -318,256 +312,17 @@ class OptionsManager {
     }, 3000);
   }
 
-  // URL Pattern Mapping Methods
-  loadUrlMappings(mappings) {
-    this.urlMappingsList.innerHTML = '';
-    
-    if (mappings.length === 0) {
-      this.urlMappingsList.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No URL pattern mappings configured. Click "Add New Rule" to create one.</div>';
-      return;
-    }
-    
-    mappings.forEach((mapping, index) => {
-      this.createUrlMappingRow(mapping, index);
-    });
-  }
+
   
-  createUrlMappingRow(mapping, index) {
-    const row = document.createElement('div');
-    row.className = 'url-mapping-item';
-    row.dataset.index = index;
-    
-    row.innerHTML = `
-      <div>
-        <input type="text" class="pattern-input" 
-               value="${this.escapeHtml(mapping.pattern || '')}" 
-               placeholder="https://example\\.com/video/(\\w+)-.*">
-        <div class="url-mapping-error pattern-error" style="display: none;"></div>
-      </div>
-      <div>
-        <input type="text" class="replacement-input" 
-               value="${this.escapeHtml(mapping.replacement || '')}" 
-               placeholder="https://example.com/video/$1">
-        <div class="url-mapping-error replacement-error" style="display: none;"></div>
-      </div>
-      <div class="url-mapping-actions">
-        <button type="button" class="action-button test-mapping" data-index="${index}">Test</button>
-        <button type="button" class="action-button save-mapping" data-index="${index}">Save</button>
-        <button type="button" class="action-button delete-mapping" data-index="${index}">Delete</button>
-      </div>
-    `;
-    
-    this.urlMappingsList.appendChild(row);
-    
-    // Attach event listeners for this row
-    this.attachMappingRowListeners(row, index);
-  }
-  
-  attachMappingRowListeners(row, index) {
-    const testBtn = row.querySelector('.test-mapping');
-    const saveBtn = row.querySelector('.save-mapping');
-    const deleteBtn = row.querySelector('.delete-mapping');
-    const patternInput = row.querySelector('.pattern-input');
-    const replacementInput = row.querySelector('.replacement-input');
-    
-    testBtn.addEventListener('click', () => this.testUrlMapping(index));
-    saveBtn.addEventListener('click', () => this.saveUrlMapping(index));
-    deleteBtn.addEventListener('click', () => this.deleteUrlMapping(index));
-    
-    // Real-time validation
-    patternInput.addEventListener('input', () => this.validatePattern(row));
-    replacementInput.addEventListener('input', () => this.validateReplacement(row));
-  }
-  
-  addUrlMapping() {
-    try {
-      const currentConfig = this.getCurrentConfig();
-      const mappings = currentConfig.urlPatternMappings || [];
-      
-      mappings.push({
-        pattern: '',
-        replacement: ''
-      });
-      
-      this.saveUrlMappings(mappings);
-      this.showStatus(this.urlMappingStatus, 'New rule added. Please configure and save.', true);
-    } catch (error) {
-      console.error('Failed to add URL mapping:', error);
-      this.showStatus(this.urlMappingStatus, 'Failed to add new rule: ' + error.message, false);
-    }
-  }
-  
-  async saveUrlMapping(index) {
-    try {
-      const row = this.urlMappingsList.children[index];
-      if (!row) return;
-      
-      const patternInput = row.querySelector('.pattern-input');
-      const replacementInput = row.querySelector('.replacement-input');
-      
-      const pattern = patternInput.value.trim();
-      const replacement = replacementInput.value.trim();
-      
-      if (!pattern || !replacement) {
-        this.showStatus(this.urlMappingStatus, 'Pattern and replacement cannot be empty', false);
-        return;
-      }
-      
-      // Validate regex pattern
-      try {
-        new RegExp(pattern);
-      } catch (error) {
-        this.showStatus(this.urlMappingStatus, 'Invalid regex pattern: ' + error.message, false);
-        return;
-      }
-      
-      const currentConfig = this.getCurrentConfig();
-      const mappings = currentConfig.urlPatternMappings || [];
-      
-      if (mappings[index]) {
-        mappings[index] = { pattern, replacement };
-      } else {
-        mappings.push({ pattern, replacement });
-      }
-      
-      await this.saveUrlMappings(mappings);
-      this.showStatus(this.urlMappingStatus, `Rule ${index + 1} saved successfully`, true);
-      
-    } catch (error) {
-      console.error('Failed to save URL mapping:', error);
-      this.showStatus(this.urlMappingStatus, 'Failed to save rule: ' + error.message, false);
-    }
-  }
-  
-  async deleteUrlMapping(index) {
-    try {
-      if (!confirm(`Are you sure you want to delete rule ${index + 1}?`)) return;
-      
-      const currentConfig = this.getCurrentConfig();
-      const mappings = currentConfig.urlPatternMappings || [];
-      
-      mappings.splice(index, 1);
-      
-      await this.saveUrlMappings(mappings);
-      this.showStatus(this.urlMappingStatus, `Rule ${index + 1} deleted successfully`, true);
-      
-    } catch (error) {
-      console.error('Failed to delete URL mapping:', error);
-      this.showStatus(this.urlMappingStatus, 'Failed to delete rule: ' + error.message, false);
-    }
-  }
-  
-  testUrlMapping(index) {
-    try {
-      const row = this.urlMappingsList.children[index];
-      if (!row) return;
-      
-      const patternInput = row.querySelector('.pattern-input');
-      const replacementInput = row.querySelector('.replacement-input');
-      
-      const pattern = patternInput.value.trim();
-      const replacement = replacementInput.value.trim();
-      
-      if (!pattern || !replacement) {
-        this.showStatus(this.urlMappingStatus, 'Please enter both pattern and replacement', false);
-        return;
-      }
-      
-      const testUrl = prompt('Enter a URL to test the pattern against:', 'https://example.com/video/abc123-watch-extra-params');
-      if (!testUrl) return;
-      
-      try {
-        const regex = new RegExp(pattern);
-        const result = testUrl.replace(regex, replacement);
-        
-        if (result === testUrl) {
-          alert(`Pattern does not match the URL.\n\nOriginal: ${testUrl}\nPattern: ${pattern}\nResult: No match`);
-        } else {
-          alert(`Pattern applied successfully!\n\nOriginal: ${testUrl}\nPattern: ${pattern}\nResult: ${result}`);
-        }
-      } catch (error) {
-        this.showStatus(this.urlMappingStatus, 'Test failed: ' + error.message, false);
-      }
-      
-    } catch (error) {
-      console.error('Failed to test URL mapping:', error);
-      this.showStatus(this.urlMappingStatus, 'Test failed: ' + error.message, false);
-    }
-  }
-  
-  async saveUrlMappings(mappings) {
-    await chrome.runtime.sendMessage({
-      type: MESSAGE_TYPES.UPDATE_CONFIG,
-      data: { urlPatternMappings: mappings }
-    });
-    
-    // Reload the display
-    this.loadUrlMappings(mappings);
-  }
+
   
   getCurrentConfig() {
     // This should ideally get the current config from the background script
     // For now, we'll construct it from the current UI state
-    return {
-      urlPatternMappings: this.getCurrentUrlMappings()
-    };
+    return {};
   }
   
-  getCurrentUrlMappings() {
-    const mappings = [];
-    const rows = this.urlMappingsList.querySelectorAll('.url-mapping-item');
-    
-    rows.forEach(row => {
-      const pattern = row.querySelector('.pattern-input')?.value.trim() || '';
-      const replacement = row.querySelector('.replacement-input')?.value.trim() || '';
-      
-      if (pattern && replacement) {
-        mappings.push({ pattern, replacement });
-      }
-    });
-    
-    return mappings;
-  }
-  
-  validatePattern(row) {
-    const input = row.querySelector('.pattern-input');
-    const errorDiv = row.querySelector('.pattern-error');
-    const value = input.value.trim();
-    
-    if (!value) {
-      this.hideError(errorDiv);
-      return true;
-    }
-    
-    try {
-      new RegExp(value);
-      this.hideError(errorDiv);
-      return true;
-    } catch (error) {
-      this.showError(errorDiv, 'Invalid regex: ' + error.message);
-      return false;
-    }
-  }
-  
-  validateReplacement(row) {
-    const input = row.querySelector('.replacement-input');
-    const errorDiv = row.querySelector('.replacement-error');
-    const value = input.value.trim();
-    
-    if (!value) {
-      this.hideError(errorDiv);
-      return true;
-    }
-    
-    // Basic validation for replacement pattern
-    if (value.includes('$') && !/\$\d+/.test(value)) {
-      this.showError(errorDiv, 'Use $1, $2, etc. for capture groups');
-      return false;
-    }
-    
-    this.hideError(errorDiv);
-    return true;
-  }
+
   
   showError(element, message) {
     element.textContent = message;

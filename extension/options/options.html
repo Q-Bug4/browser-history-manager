@@ -37,37 +37,12 @@
         </div>
 
         <div class="setting-item">
-          <h3>URL Pattern Mapping</h3>
+          <h3>URL Normalization</h3>
           <p class="setting-desc">
-            <strong>Note:</strong> These rules are used for URL normalization during link highlighting. When checking if a link has been visited, the URL will be matched against these patterns and transformed before querying the history.
-            This allows similar URLs (like <code>abc.com/1#side</code> and <code>abc.com/1-top</code>) to be treated as the same URL (<code>abc.com/1</code>) for highlighting purposes.
-            Each rule is applied once per URL, and processing stops after the first successful match.
+            <strong>URL normalization rules have been moved to the backend system.</strong><br>
+            Please use the frontend management interface at <a href="http://localhost:18180" target="_blank">http://localhost:18180</a> to manage URL normalization rules.
+            This provides better rule management, testing capabilities, and centralized configuration.
           </p>
-          
-          <div id="urlMappingsContainer">
-            <div class="url-mapping-header">
-              <span>Regex Pattern (JS)</span>
-              <span>Replacement</span>
-              <span>Actions</span>
-            </div>
-            <div id="urlMappingsList">
-              <!-- URL mappings will be inserted here -->
-            </div>
-            <div class="url-mapping-controls">
-              <button id="addUrlMapping" class="action-button">Add New Rule</button>
-              <span id="urlMappingStatus" class="status-text"></span>
-            </div>
-          </div>
-          
-          <div class="url-mapping-example">
-            <h4>Example:</h4>
-            <div class="example-item">
-              <strong>Pattern:</strong> <code>https://abc\.com/(\d+).*</code><br>
-              <strong>Replacement:</strong> <code>https://abc.com/$1</code><br>
-              <strong>Result:</strong> Both <code>https://abc.com/1#side</code> and <code>https://abc.com/1-top</code> → <code>https://abc.com/1</code><br>
-              <em>This means visiting either URL will highlight both links on the page.</em>
-            </div>
-          </div>
         </div>
       </section>
     </div>

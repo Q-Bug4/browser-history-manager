@@ -210,19 +210,17 @@ class HistoryManager extends EventEmitter {
         }
       }
 
-      // 从后端查询
-      const normalizedUrl = this.normalizeUrl(url);
-      const response = await this.httpClient.get(API_ENDPOINTS.HISTORY, {
-        keyword: normalizedUrl,
-        pageSize: 1
+      // 从后端查询 - 使用新的URL查询API
+      const response = await this.httpClient.post('/api/history/query', {
+        url: url  // 直接使用原始URL，后端会处理归一化
       });
 
-      if (response.items && response.items.length > 0) {
+      if (response.data && response.data[url]) {
         const record = {
-          url: response.items[0].url,
-          timestamp: response.items[0].timestamp,
+          url: response.data[url].original_url || response.data[url].url,
+          timestamp: response.data[url].timestamp,
           visitCount: 1,
-          title: response.items[0].title || ''
+          title: response.data[url].title || ''
         };
 
         // 缓存查询结果
@@ -276,48 +274,29 @@ class HistoryManager extends EventEmitter {
         uncachedUrls.push(...urls);
       }
 
-      // 从后端批量查询未缓存的URL
+      // 从后端批量查询未缓存的URL - 使用新的批量查询API
       if (uncachedUrls.length > 0) {
-        const queryParams = {
-          pageSize: 2000
-        };
+        const response = await this.httpClient.post('/api/history/query', {
+          urls: uncachedUrls  // 直接使用原始URLs，后端会处理归一化
+        });
 
-        if (domain) {
-          queryParams.domain = domain;
-        }
-
-        const response = await this.httpClient.get(API_ENDPOINTS.HISTORY, queryParams);
-
-        if (response.items && Array.isArray(response.items)) {
-          const historyMap = new Map();
+        if (response.data && typeof response.data === 'object') {
           const recordsToCache = [];
 
-          // 预处理历史记录
-          for (const item of response.items) {
-            if (!item || !item.url) continue;
+          // 处理响应数据
+          for (const [url, item] of Object.entries(response.data)) {
+            if (!item) continue;
 
             const record = {
-              url: item.url,
+              url: item.original_url || item.url,
               timestamp: item.timestamp,
               visitCount: 1,
               title: item.title || ''
             };
 
-            historyMap.set(item.url, record);
-            historyMap.set(this.normalizeUrl(item.url), record);
+            // 直接使用URL映射，后端已经处理了归一化
+            results.set(url, record);
             recordsToCache.push(record);
-          }
-
-          // 匹配URL
-          for (const url of uncachedUrls) {
-            if (historyMap.has(url)) {
-              results.set(url, historyMap.get(url));
-            } else {
-              const normalizedUrl = this.normalizeUrl(url);
-              if (historyMap.has(normalizedUrl)) {
-                results.set(url, historyMap.get(normalizedUrl));
-              }
-            }
           }
 
           // 批量缓存新记录
@@ -379,30 +358,7 @@ class HistoryManager extends EventEmitter {
     }
   }
 
-  /**
-   * 规范化URL
-   * @param {string} url 原始URL
-   * @returns {string} 规范化后的URL
-   */
-  normalizeUrl(url) {
-    try {
-      const parsed = new URL(url);
-      
-      // 移除片段标识符
-      parsed.hash = '';
-      
-      // 移除末尾斜杠（除了根路径）
-      if (parsed.pathname.endsWith('/') && parsed.pathname !== '/') {
-        parsed.pathname = parsed.pathname.slice(0, -1);
-      }
-      
-      // 转换为小写
-      return parsed.toString().toLowerCase();
-    } catch (error) {
-      this.logger.warn('Failed to normalize URL:', url, error);
-      return url.toLowerCase();
-    }
-  }
+
 
   /**
    * 验证URL是否有效

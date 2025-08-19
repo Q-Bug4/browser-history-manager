@@ -41,7 +41,7 @@ class LinkHighlighter {
     this.observer = null;
     this.eventHandlers = new Map();
     this.processNewLinksTimer = null;
-    this.urlPatternMappings = []; // URL模式映射配置
+
   }
 
   /**
@@ -94,10 +94,7 @@ class LinkHighlighter {
 
       if (response && response.success) {
         this.config = response.data;
-        // 加载URL模式映射配置
-        this.urlPatternMappings = this.config.urlPatternMappings || [];
         console.log('[LinkHighlighter] Config loaded:', this.config);
-        console.log('[LinkHighlighter] URL pattern mappings loaded:', this.urlPatternMappings);
       } else {
         throw new Error(response?.error || 'Failed to get config');
       }
@@ -241,63 +238,7 @@ class LinkHighlighter {
     }
   }
 
-  /**
-   * URL归一化处理
-   * 根据配置的模式映射规则将URL转换为归一化形式
-   * @param {string} url 原始URL
-   * @param {boolean} returnDetails 是否返回详细信息
-   * @returns {string|Object} 归一化后的URL或详细信息对象
-   */
-  normalizeUrl(url, returnDetails = false) {
-    if (!url || !this.urlPatternMappings || this.urlPatternMappings.length === 0) {
-      return returnDetails ? { normalizedUrl: url, applied: false } : url;
-    }
 
-    try {
-      for (let i = 0; i < this.urlPatternMappings.length; i++) {
-        const mapping = this.urlPatternMappings[i];
-        if (!mapping.pattern || !mapping.replacement) {
-          continue;
-        }
-
-        try {
-          const regex = new RegExp(mapping.pattern);
-          const normalizedUrl = url.replace(regex, mapping.replacement);
-          
-          // 如果URL发生了变化，说明匹配成功
-          if (normalizedUrl !== url) {
-            console.log(`[LinkHighlighter] URL normalized: ${url} -> ${normalizedUrl}`);
-            
-            if (returnDetails) {
-              return {
-                originalUrl: url,
-                normalizedUrl: normalizedUrl,
-                applied: true,
-                rule: {
-                  index: i + 1,
-                  pattern: mapping.pattern,
-                  replacement: mapping.replacement
-                }
-              };
-            }
-            
-            return normalizedUrl;
-          }
-        } catch (regexError) {
-          console.warn(`[LinkHighlighter] Invalid regex pattern: ${mapping.pattern}`, regexError);
-        }
-      }
-    } catch (error) {
-      console.error('[LinkHighlighter] Error normalizing URL:', error);
-    }
-
-    // 如果没有匹配的规则，返回原URL
-    return returnDetails ? { 
-      originalUrl: url,
-      normalizedUrl: url, 
-      applied: false 
-    } : url;
-  }
 
   /**
    * 批量检查历史记录
@@ -306,16 +247,11 @@ class LinkHighlighter {
     try {
       console.log('[LinkHighlighter] Requesting history for URLs:', urls);
       
-      // 先对URL进行归一化处理
-      const normalizedUrls = urls.map(url => this.normalizeUrl(url));
-      const uniqueNormalizedUrls = [...new Set(normalizedUrls)];
-      
-      console.log('[LinkHighlighter] Normalized URLs:', uniqueNormalizedUrls);
-      
+      // 直接使用原始URLs，后端会处理归一化
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
         data: {
-          urls: uniqueNormalizedUrls,
+          urls: urls,
           domain: window.location.hostname
         }
       });
@@ -326,20 +262,13 @@ class LinkHighlighter {
         console.log('[LinkHighlighter] History data:', response.data);
         
         const historyMap = new Map();
-        const normalizedHistoryMap = new Map(Object.entries(response.data || {}));
         
-        console.log('[LinkHighlighter] Normalized history map size:', normalizedHistoryMap.size);
-        
-        // 为原始URL创建映射，如果归一化URL有历史记录，则原始URL也标记为已访问
-        for (let i = 0; i < urls.length; i++) {
-          const originalUrl = urls[i];
-          const normalizedUrl = normalizedUrls[i];
-          
-          const historyRecord = normalizedHistoryMap.get(normalizedUrl);
-          if (historyRecord) {
-            historyMap.set(originalUrl, historyRecord);
-            this.visitCache.set(originalUrl, historyRecord);
-            console.log(`[LinkHighlighter] Found history for ${originalUrl} via normalized URL ${normalizedUrl}`);
+        // 直接使用响应数据
+        for (const [url, record] of Object.entries(response.data || {})) {
+          if (record) {
+            historyMap.set(url, record);
+            this.visitCache.set(url, record);
+            console.log(`[LinkHighlighter] Found history for ${url}`);
           }
         }
 
@@ -494,14 +423,10 @@ class LinkHighlighter {
     try {
       console.log('[LinkHighlighter] Requesting single history record for:', url);
       
-      // 先对URL进行归一化处理
-      const normalizedUrl = this.normalizeUrl(url);
-      console.log('[LinkHighlighter] Normalized URL for single query:', normalizedUrl);
-      
       const response = await chrome.runtime.sendMessage({
         type: MESSAGE_TYPES.GET_HISTORY,
         data: { 
-          url: normalizedUrl,  // 使用归一化后的URL查询
+          url: url,  // 直接使用原始URL，后端会处理归一化
           domain: window.location.hostname 
         }
       });
@@ -513,12 +438,11 @@ class LinkHighlighter {
         
         // 检查返回的数据格式
         if (historyData && typeof historyData === 'object') {
-          // 查找归一化URL的记录
-          const record = historyData[normalizedUrl];
+          // 查找URL的记录
+          const record = historyData[url];
           if (record) {
-            // 为原始URL也缓存这个记录
             this.visitCache.set(url, record);
-            console.log(`[LinkHighlighter] Found history for ${url} via normalized URL ${normalizedUrl}:`, record);
+            console.log(`[LinkHighlighter] Found history for ${url}:`, record);
             return record;
           }
         }
@@ -585,51 +509,7 @@ class LinkHighlighter {
     urlElement.style.color = '#666';
     content.appendChild(urlElement);
 
-    // 添加URL归一化信息
-    const normalizationInfo = this.normalizeUrl(link.href, true);
-    if (normalizationInfo.applied) {
-      const normalizationSection = document.createElement('div');
-      normalizationSection.className = 'tooltip-normalization';
-      normalizationSection.style.marginTop = '8px';
-      normalizationSection.style.padding = '6px';
-      normalizationSection.style.backgroundColor = '#f0f8ff';
-      normalizationSection.style.border = '1px solid #e0e0e0';
-      normalizationSection.style.borderRadius = '3px';
-      normalizationSection.style.fontSize = '11px';
 
-      // 标题
-      const titleElement = document.createElement('div');
-      titleElement.textContent = '🔧 URL Normalization Applied';
-      titleElement.style.fontWeight = 'bold';
-      titleElement.style.color = '#2196f3';
-      titleElement.style.marginBottom = '4px';
-      normalizationSection.appendChild(titleElement);
-
-      // 规则信息
-      const ruleElement = document.createElement('div');
-      ruleElement.innerHTML = `
-        <div style="margin-bottom: 2px;"><strong>Rule ${normalizationInfo.rule.index}:</strong></div>
-        <div style="margin-bottom: 2px; font-family: monospace; color: #d73502;">Pattern: ${this.escapeHtml(normalizationInfo.rule.pattern)}</div>
-        <div style="margin-bottom: 4px; font-family: monospace; color: #0066cc;">Replace: ${this.escapeHtml(normalizationInfo.rule.replacement)}</div>
-      `;
-      normalizationSection.appendChild(ruleElement);
-
-      // 转换结果
-      if (normalizationInfo.originalUrl !== normalizationInfo.normalizedUrl) {
-        const resultElement = document.createElement('div');
-        resultElement.innerHTML = `
-          <div style="margin-bottom: 2px;"><strong>Result:</strong></div>
-          <div style="font-family: monospace; color: #666; word-break: break-all;">
-            ${this.escapeHtml(normalizationInfo.originalUrl)} 
-            <div style="text-align: center; color: #2196f3; margin: 2px 0;">↓</div>
-            ${this.escapeHtml(normalizationInfo.normalizedUrl)}
-          </div>
-        `;
-        normalizationSection.appendChild(resultElement);
-      }
-
-      content.appendChild(normalizationSection);
-    }
 
     tooltip.appendChild(content);
 
@@ -830,11 +710,8 @@ class LinkHighlighter {
   async handleConfigUpdate(newConfig) {
     try {
       this.config = newConfig;
-      this.urlPatternMappings = newConfig.urlPatternMappings || [];
-      
-      console.log('[LinkHighlighter] Updated URL pattern mappings:', this.urlPatternMappings);
 
-      // 清除缓存，因为URL归一化规则可能已改变
+      // 清除缓存
       this.visitCache.clear();
       this.processedUrls.clear();
 
