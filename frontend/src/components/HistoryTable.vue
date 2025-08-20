@@ -11,9 +11,9 @@
         {{ calculateIndex(index) }}
       </template>
 
-      <template v-slot:item.url="{ item }">
-        <a :href="item.url" target="_blank" class="text-decoration-none">
-          {{ item.url }}
+      <template v-slot:item.original_url="{ item }">
+        <a :href="item.original_url" target="_blank" class="text-decoration-none">
+          {{ item.original_url }}
         </a>
       </template>
 
@@ -65,7 +65,7 @@ const headers = [
   },
   {
     title: 'URL',
-    key: 'url',
+    key: 'original_url',
     width: 'auto'
   },
   {
