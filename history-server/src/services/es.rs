@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 pub async fn search_history(
     client: &Elasticsearch,
+    index: &str,
     keyword: Option<String>,
     domain: Option<String>,
     start_date: Option<String>,
@@ -48,7 +49,7 @@ pub async fn search_history(
         if !domain.is_empty() {
             must_array.push(json!({
                 "term": {
-                    "domain.keyword": domain
+                    "domain": domain
                 }
             }));
         }
@@ -93,7 +94,7 @@ pub async fn search_history(
     tracing::info!("ES Query: {}", serde_json::to_string_pretty(&body).unwrap());
 
     let response = client
-        .search(SearchParts::Index(&["browser-history"]))
+        .search(SearchParts::Index(&[index]))
         .body(body)
         .send()
         .await?;
@@ -125,6 +126,7 @@ pub async fn search_history(
 
 pub async fn insert_history(
     client: &Elasticsearch,
+    index: &str,
     original_url: &str,
     normalized_url: &str,
     timestamp: &str,
@@ -134,13 +136,11 @@ pub async fn insert_history(
         "timestamp": timestamp,
         "original_url": original_url,
         "normalized_url": normalized_url,
-        "domain": domain,
-        // 保留url字段用于兼容性（但不再使用）
-        "url": original_url
+        "domain": domain
     });
 
     client
-        .index(IndexParts::Index("browser-history"))
+        .index(IndexParts::Index(index))
         .body(doc)
         .send()
         .await?;
@@ -148,26 +148,16 @@ pub async fn insert_history(
     Ok(())
 }
 
-// 兼容旧API的写入方法
-pub async fn insert_history_legacy(
-    client: &Elasticsearch,
-    url: &str,
-    timestamp: &str,
-    domain: &str,
-) -> Result<(), ElasticsearchError> {
-    // 对于旧API，original_url和normalized_url都是同一个值
-    insert_history(client, url, url, timestamp, domain).await
-}
-
 /// 根据归一化URL查询历史记录（单个URL）
 pub async fn search_history_by_normalized_url(
     client: &Elasticsearch,
+    index: &str,
     normalized_url: &str,
 ) -> Result<Option<Value>, ElasticsearchError> {
     let query = json!({
         "query": {
             "term": {
-                "normalized_url.keyword": normalized_url
+                "normalized_url": normalized_url
             }
         },
         "size": 1,
@@ -179,7 +169,7 @@ pub async fn search_history_by_normalized_url(
     tracing::info!("ES Query for normalized URL {}: {}", normalized_url, serde_json::to_string_pretty(&query).unwrap());
 
     let response = client
-        .search(SearchParts::Index(&["browser-history"]))
+        .search(SearchParts::Index(&[index]))
         .body(query)
         .send()
         .await?;
@@ -199,16 +189,18 @@ pub async fn search_history_by_normalized_url(
 /// 批量查询归一化URL的历史记录
 pub async fn search_history_by_normalized_urls(
     client: &Elasticsearch,
+    index: &str,
     normalized_urls: Vec<String>,
 ) -> Result<HashMap<String, Value>, ElasticsearchError> {
     if normalized_urls.is_empty() {
+        tracing::info!("No normalized URLs provided");
         return Ok(HashMap::new());
     }
 
     let query = json!({
         "query": {
             "terms": {
-                "normalized_url.keyword": normalized_urls
+                "normalized_url": normalized_urls
             }
         },
         "size": normalized_urls.len(),
@@ -220,12 +212,13 @@ pub async fn search_history_by_normalized_urls(
     tracing::info!("ES Query for {} normalized URLs: {}", normalized_urls.len(), serde_json::to_string_pretty(&query).unwrap());
 
     let response = client
-        .search(SearchParts::Index(&["browser-history"]))
+        .search(SearchParts::Index(&[index]))
         .body(query)
         .send()
         .await?;
 
     let response_body = response.json::<Value>().await?;
+    tracing::info!("ES Response: {}", serde_json::to_string_pretty(&response_body).unwrap());
     
     let mut results = HashMap::new();
     

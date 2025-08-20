@@ -1,6 +1,6 @@
 [elasticsearch]
 url = "http://localhost:19200"
-index = "browser-history"
+index = "browser-history-index-v2"
 
 [server]
 host = "127.0.0.1"

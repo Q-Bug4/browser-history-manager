@@ -206,6 +206,7 @@ async fn search_history(
     // 从Elasticsearch查询数据
     match es::search_history(
         &es_client,
+        &app_state.config.elasticsearch.index,
         query.keyword.clone(),
         query.domain.clone(),
         query.start_date.clone(),
@@ -287,7 +288,7 @@ async fn report_history(
     
     tracing::info!("URL normalization: {} -> {}", original_url, normalized_url);
     
-    match es::insert_history(&es_client, original_url, &normalized_url, &request.timestamp, &request.domain).await {
+    match es::insert_history(&es_client, &app_state.config.elasticsearch.index, original_url, &normalized_url, &request.timestamp, &request.domain).await {
         Ok(_) => {
             HttpResponse::Ok().json(json!({
                 "status": "success",
@@ -355,7 +356,7 @@ async fn query_history_by_urls(
     }
     
     // 查询ES
-    match es::search_history_by_normalized_urls(&es_client, normalized_urls).await {
+    match es::search_history_by_normalized_urls(&es_client, &app_state.config.elasticsearch.index, normalized_urls).await {
         Ok(results) => {
             // 将结果映射回原始URL
             let mut response_data = std::collections::HashMap::new();
