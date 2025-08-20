@@ -263,11 +263,12 @@ class LinkHighlighter {
         
         const historyMap = new Map();
         
-        // 直接使用响应数据
-        for (const [url, record] of Object.entries(response.data || {})) {
-          if (record) {
-            historyMap.set(url, record);
-            this.visitCache.set(url, record);
+        // 检查是否有有效的历史记录
+        if (response.data && (response.data.visitCount > 0 || response.data.timestamp)) {
+          // 将记录应用到所有查询的URL
+          for (const url of urls) {
+            historyMap.set(url, response.data);
+            this.visitCache.set(url, response.data);
             console.log(`[LinkHighlighter] Found history for ${url}`);
           }
         }
@@ -436,15 +437,11 @@ class LinkHighlighter {
       if (response && response.success) {
         const historyData = response.data;
         
-        // 检查返回的数据格式
-        if (historyData && typeof historyData === 'object') {
-          // 查找URL的记录
-          const record = historyData[url];
-          if (record) {
-            this.visitCache.set(url, record);
-            console.log(`[LinkHighlighter] Found history for ${url}:`, record);
-            return record;
-          }
+        // 只要有记录就算访问过
+        if (historyData && (historyData.visitCount > 0 || historyData.timestamp)) {
+          this.visitCache.set(url, historyData);
+          console.log(`[LinkHighlighter] Found history for ${url}:`, historyData);
+          return historyData;
         }
       }
 
